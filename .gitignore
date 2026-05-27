@@ -29,3 +29,5 @@ frontend/windows/flutter/ephemeral/
 desktop.ini
 Thumbs.db
 .DS_Store
+
+.env
