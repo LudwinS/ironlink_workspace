@@ -1,13 +1,15 @@
-// ─────────────────────────────────────────────
-//  IronLink — Entry point
-//  Ubicación: frontend/lib/main.dart
-// ─────────────────────────────────────────────
-
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/router/app_router.dart';
 
 void main() {
-  runApp(const IronLinkApp());
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  runApp(
+    const ProviderScope(
+      child: IronLinkApp(),
+    ),
+  );
 }
 
 class IronLinkApp extends StatelessWidget {
@@ -16,21 +18,43 @@ class IronLinkApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp.router(
-      title: 'IronLink',
+      title: 'IronLink Portal',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
+      
+      // Enrutador de GoRouter
+      routerConfig: AppRouter.router,
+      
+      // Tema Oscuro Premium Integrado con la Paleta de la Marca (Mint Green & Tech Navy)
+      themeMode: ThemeMode.dark,
+      darkTheme: ThemeData(
         brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF0A0C0F),
+        useMaterial3: true,
+        
+        // Colores de la paleta oficial cargados
+        scaffoldBackgroundColor: const Color(0xFF001524), // Fondo: Deep Tech Navy 950
         colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF00E5A0),
-          secondary: Color(0xFF0099FF),
-          surface: Color(0xFF0F1318),
+          primary: Color(0xFF00BFA5), // Mint Green
+          secondary: Color(0xFF00E5FF), // Cyan/Teal
+          surface: Color(0xFF002238), // Card: Dark Tech Navy 900
+          error: Color(0xFFEF4444), // Red 500
         ),
-        // Fuentes: añadir en pubspec.yaml → google_fonts: ^6.0.0
-        // y reemplazar fontFamily por GoogleFonts.syne() / ibmPlexMono()
-        fontFamily: 'sans-serif',
+        
+        // Estilo de tipografía
+        fontFamily: 'Inter',
+        textTheme: const TextTheme(
+          titleLarge: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          bodyLarge: TextStyle(color: Color(0xFFF1F5F9)), // Slate 100
+          bodyMedium: TextStyle(color: Color(0xFF94A3B8)), // Slate 400
+        ),
+        
+        // Estilo de botones
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            elevation: 0,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
       ),
-      routerConfig: appRouter,
     );
   }
 }
