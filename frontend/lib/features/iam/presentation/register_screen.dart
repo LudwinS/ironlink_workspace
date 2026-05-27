@@ -2,6 +2,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/widgets/no_scrollbar_behavior.dart';
 import '../providers/auth_provider.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
@@ -72,11 +73,13 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
           ),
           
           Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 440),
-                child: Column(
+            child: ScrollConfiguration(
+              behavior: const NoScrollbarBehavior(),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 440),
+                  child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -300,9 +303,10 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               ),
             ),
           ),
-        ],
-      ),
-    );
+        ),
+          ],
+        ),
+      );
   }
 
   InputDecoration _inputDecoration({required String hint, required IconData icon, Widget? suffix}) {

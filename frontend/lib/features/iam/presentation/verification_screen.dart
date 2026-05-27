@@ -2,6 +2,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/widgets/no_scrollbar_behavior.dart';
 import '../providers/auth_provider.dart';
 
 class VerificationScreen extends ConsumerWidget {
@@ -37,11 +38,13 @@ class VerificationScreen extends ConsumerWidget {
           ),
           
           Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 440),
-                child: Column(
+            child: ScrollConfiguration(
+              behavior: const NoScrollbarBehavior(),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 440),
+                  child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -225,9 +228,10 @@ class VerificationScreen extends ConsumerWidget {
               ),
             ),
           ),
-        ],
-      ),
-    );
+        ),
+          ],
+        ),
+      );
   }
 
   Widget _bulletInstruction(String text) {
