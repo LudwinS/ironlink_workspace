@@ -1,6 +1,6 @@
 use axum::{routing::post, Router};
 use std::net::SocketAddr;
-use tower_http::cors::{CorsLayer, Any};
+use tower_http::cors::{Any, CorsLayer};
 
 mod db;
 mod auth; // 1. Registramos el módulo auth para que compile
@@ -16,12 +16,18 @@ async fn main() {
     let pool = db::conn::establish_connexion().await;
     println!("Conectado a la base de datos con éxito.");
 
+    // Configurar CORS
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
+
     // 4. Crear el enrutador de Axum y montar la ruta /register
     // Le pasamos el 'pool' como estado (State) para que 'register_user' pueda usarlo
     let app = Router::new()
         .route("/register", post(auth::service::register_user))
-        .with_state(pool)
-        .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any));
+        .layer(cors)
+        .with_state(pool);
 
     // 5. Configurar la dirección local (localhost en el puerto 8080)
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
