@@ -11,6 +11,7 @@ class AuthState {
   final String? role;
   final String? errorMessage;
   final String? successMessage;
+  final Map<String, String>? fieldErrors;
 
   AuthState({
     this.status = AuthStatus.initial,
@@ -19,6 +20,7 @@ class AuthState {
     this.role,
     this.errorMessage,
     this.successMessage,
+    this.fieldErrors,
   });
 
   AuthState copyWith({
@@ -28,6 +30,7 @@ class AuthState {
     String? role,
     String? errorMessage,
     String? successMessage,
+    Map<String, String>? fieldErrors,
   }) {
     return AuthState(
       status: status ?? this.status,
@@ -36,6 +39,7 @@ class AuthState {
       role: role ?? this.role,
       errorMessage: errorMessage ?? this.errorMessage,
       successMessage: successMessage ?? this.successMessage,
+      fieldErrors: fieldErrors ?? this.fieldErrors,
     );
   }
 }
@@ -65,6 +69,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
+  /// Limpia los errores de campo para permitir reintento limpio
+  void clearFieldErrors() {
+    state = state.copyWith(
+      fieldErrors: null,
+      errorMessage: null,
+    );
+  }
+
   /// Registro de usuario conectado al backend de Rust
   Future<bool> register({
     required String name,
@@ -72,7 +84,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
     required String phone,
     required String password,
   }) async {
-    state = state.copyWith(status: AuthStatus.loading, errorMessage: null, successMessage: null);
+    state = state.copyWith(
+      status: AuthStatus.loading,
+      errorMessage: null,
+      successMessage: null,
+      fieldErrors: null,
+    );
     try {
       final message = await _repository.register(
         name: name,
@@ -80,13 +97,20 @@ class AuthNotifier extends StateNotifier<AuthState> {
         phone: phone,
         password: password,
       );
-      
+
       state = state.copyWith(
         status: AuthStatus.verificationPending,
         email: email,
         successMessage: message,
       );
       return true;
+    } on FieldValidationException catch (e) {
+      state = state.copyWith(
+        status: AuthStatus.unauthenticated,
+        errorMessage: e.message,
+        fieldErrors: e.fieldErrors,
+      );
+      return false;
     } catch (e) {
       state = state.copyWith(
         status: AuthStatus.unauthenticated,
@@ -97,7 +121,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<bool> login(String email, String password) async {
-    state = state.copyWith(status: AuthStatus.loading, errorMessage: null, successMessage: null);
+    state = state.copyWith(status: AuthStatus.loading, errorMessage: null, successMessage: null, fieldErrors: null);
     try {
       await _repository.login(email: email, password: password);
       final username = await SecureVault.getUsername();

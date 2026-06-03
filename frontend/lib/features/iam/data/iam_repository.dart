@@ -2,6 +2,17 @@ import 'package:dio/dio.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/security/secure_vault.dart';
 
+/// Excepción personalizada para errores de validación con errores por campo.
+class FieldValidationException implements Exception {
+  final String message;
+  final Map<String, String> fieldErrors;
+
+  FieldValidationException({required this.message, required this.fieldErrors});
+
+  @override
+  String toString() => message;
+}
+
 class IamRepository {
   final Dio _client = ApiClient.instance;
 
@@ -14,7 +25,7 @@ class IamRepository {
   }) async {
     try {
       final response = await _client.post(
-        '/register', // Endpoint directo según tu main.rs
+        '/register',
         data: {
           'name': name,
           'email': email,
@@ -22,22 +33,44 @@ class IamRepository {
           'password': password,
         },
       );
-      
-      // Dado que tu backend devuelve un texto plano (String), leemos la respuesta directa
+
+      final data = response.data;
+      if (data is Map<String, dynamic>) {
+        return data['message'] ?? 'Registro exitoso.';
+      }
       return response.data.toString();
     } on DioException catch (e) {
-      final errorMessage = e.response?.data?.toString() ?? 'Fallo al conectar con el servidor de registro';
-      throw Exception(errorMessage);
+      final responseData = e.response?.data;
+
+      // Parsear respuesta JSON estructurada del backend
+      if (responseData is Map<String, dynamic>) {
+        final fieldErrors = <String, String>{};
+        if (responseData['field_errors'] != null && responseData['field_errors'] is Map) {
+          (responseData['field_errors'] as Map).forEach((key, value) {
+            fieldErrors[key.toString()] = value.toString();
+          });
+        }
+
+        if (fieldErrors.isNotEmpty) {
+          throw FieldValidationException(
+            message: responseData['message'] ?? 'Error de validación',
+            fieldErrors: fieldErrors,
+          );
+        }
+
+        throw Exception(responseData['message'] ?? 'Error en el registro');
+      }
+
+      throw Exception(e.response?.data?.toString() ?? 'Fallo al conectar con el servidor de registro');
     }
   }
 
-  /// Envía petición de inicio de sesión (Placeholder para cuando se implemente en tu backend)
+  /// Envía petición de inicio de sesión
   Future<void> login({
     required String email,
     required String password,
   }) async {
     try {
-      // Endpoint simulado para conectar en el futuro
       final response = await _client.post(
         '/login',
         data: {
@@ -66,12 +99,12 @@ class IamRepository {
   }) async {
     try {
       final response = await _client.post(
-        '/resend-verification', // Se mapeará con el endpoint del backend
+        '/resend-verification',
         data: {
           'email': email,
         },
       );
-      
+
       return response.data.toString();
     } on DioException catch (e) {
       final errorMessage = e.response?.data?.toString() ?? 'Error al solicitar el reenvío de código';

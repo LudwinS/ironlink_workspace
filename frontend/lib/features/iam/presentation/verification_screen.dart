@@ -1,23 +1,113 @@
+// ignore_for_file: unused_element
+
+import 'dart:async';
 import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
 import '../../../core/widgets/no_scrollbar_behavior.dart';
 import '../providers/auth_provider.dart';
 
-class VerificationScreen extends ConsumerWidget {
+// ── Color Palette Constants ──
+const Color _navy950 = Color(0xFF03101E);
+const Color _navy900 = Color(0xFF071B2D);
+const Color _border = Color(0xFF103A5C);
+const Color _mint = Color(0xFF14E3A4);
+const Color _darkMint = Color(0xFF0A5C52);
+const Color _cyan = Color(0xFF00FFD0);
+const Color _slate100 = Color(0xFFF1F5F9);
+const Color _slate400 = Color(0xFF94A3B8);
+const Color _slate500 = Color(0xFF475569);
+const Color _slate600 = Color(0xFF64748B);
+const Color _errorRed = Color(0xFFEF4444);
+const Color _errorText = Color(0xFFFCA5A5);
+
+class VerificationScreen extends ConsumerStatefulWidget {
   final String email;
   const VerificationScreen({super.key, required this.email});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<VerificationScreen> createState() => _VerificationScreenState();
+}
+
+class _VerificationScreenState extends ConsumerState<VerificationScreen> {
+  // OTP controllers & focus nodes
+  late final List<TextEditingController> _otpControllers;
+  late final List<FocusNode> _otpFocusNodes;
+
+  // Countdown timer
+  Timer? _countdownTimer;
+  int _secondsRemaining = 60;
+
+  @override
+  void initState() {
+    super.initState();
+    _otpControllers = List.generate(6, (_) => TextEditingController());
+    _otpFocusNodes = List.generate(6, (_) => FocusNode());
+    _startCountdown();
+  }
+
+  @override
+  void dispose() {
+    _countdownTimer?.cancel();
+    for (final c in _otpControllers) {
+      c.dispose();
+    }
+    for (final f in _otpFocusNodes) {
+      f.dispose();
+    }
+    super.dispose();
+  }
+
+  void _startCountdown() {
+    _secondsRemaining = 60;
+    _countdownTimer?.cancel();
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_secondsRemaining <= 0) {
+        timer.cancel();
+      } else {
+        setState(() => _secondsRemaining--);
+      }
+    });
+  }
+
+  void _handleResend() {
+    ref.read(authProvider.notifier).resendVerification(widget.email);
+    _startCountdown();
+  }
+
+  String get _otpCode =>
+      _otpControllers.map((c) => c.text).join();
+
+  bool get _isOtpComplete => _otpCode.length == 6;
+
+  String _maskEmail(String email) {
+    final parts = email.split('@');
+    if (parts.length != 2) return email;
+    final name = parts[0];
+    final domain = parts[1];
+    if (name.length <= 1) return email;
+    return '${name[0]}***@$domain';
+  }
+
+  String _emailDomain(String email) {
+    final parts = email.split('@');
+    if (parts.length != 2) return email;
+    return parts[1];
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final authState = ref.watch(authProvider);
 
     return Scaffold(
-      backgroundColor: const Color(0xFF001524), // Fondo: Deep Tech Navy 950
+      backgroundColor: _navy950,
       body: Stack(
         children: [
-          // Orbe de fondo brillante con los colores de la paleta
+          // ── Background orb ──
           Positioned(
             top: -150,
             right: -150,
@@ -26,7 +116,7 @@ class VerificationScreen extends ConsumerWidget {
               height: 400,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFF00BFA5).withOpacity(0.12), // Mint Green Glow
+                color: _mint.withOpacity(0.12),
               ),
               child: ClipOval(
                 child: BackdropFilter(
@@ -36,214 +126,570 @@ class VerificationScreen extends ConsumerWidget {
               ),
             ),
           ),
-          
+
+          // ── Content ──
           Center(
             child: ScrollConfiguration(
               behavior: const NoScrollbarBehavior(),
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 440),
+                  constraints: const BoxConstraints(maxWidth: 520),
                   child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // INTEGRACIÓN DEL LOGO ORIGINAL
-                    Center(
-                      child: Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.04),
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(color: const Color(0xFF1E3A52), width: 1),
-                        ),
-                        child: Image.asset(
-                          'assets/logo.png',
-                          width: 180,
-                          height: 120,
-                          fit: BoxFit.contain,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 36),
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // ── Step indicator ──
+                      _buildStepIndicator(),
+                      const SizedBox(height: 32),
 
-                    const Center(
-                      child: Text(
-                        '¡Revisa tu correo!',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 32,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    const Center(
-                      child: Text(
-                        'Hemos enviado un enlace de activación a:',
-                        style: TextStyle(color: Color(0xFF64748B), fontSize: 14),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Center(
-                      child: Text(
-                        email.isNotEmpty ? email : 'tu dirección de correo registrada',
-                        style: const TextStyle(
-                          color: Color(0xFF00BFA5), // Mint Green
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 36),
+                      // ── Success banner ──
+                      if (authState.successMessage != null) ...[
+                        _buildSuccessBanner(authState.successMessage!),
+                        const SizedBox(height: 20),
+                      ],
 
-                    // Mensaje de éxito al reenviar
-                    if (authState.successMessage != null) ...[
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF00BFA5).withOpacity(0.1),
-                          border: Border.all(color: const Color(0xFF00BFA5).withOpacity(0.3)),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.check_circle_outline, color: Color(0xFF00BFA5), size: 24),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                authState.successMessage!,
-                                style: const TextStyle(color: Color(0xFFA7F3D0), fontSize: 13),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      // ── Error banner ──
+                      if (authState.errorMessage != null) ...[
+                        _buildErrorBanner(authState.errorMessage!),
+                        const SizedBox(height: 20),
+                      ],
+
+                      // ── Main card ──
+                      _buildMainCard(authState),
                       const SizedBox(height: 24),
+
+                      // ── Footer ──
+                      _buildFooter(),
                     ],
-
-                    // Tarjeta Informativa (Glassmorphism con colores de paleta)
-                    Container(
-                      padding: const EdgeInsets.all(32),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF002238).withOpacity(0.85), // Card: Dark Tech Navy 900
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: const Color(0xFF1E3A52), width: 1.5),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.3),
-                            blurRadius: 30,
-                            offset: const Offset(0, 15),
-                          )
-                        ],
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          const Text(
-                            'Instrucciones de activación:',
-                            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 16),
-                          _bulletInstruction('Abre tu correo y busca el mensaje de IronLink.'),
-                          const SizedBox(height: 12),
-                          _bulletInstruction('Haz clic en el enlace adjunto para activar la cuenta (validez de 24 horas).'),
-                          const SizedBox(height: 12),
-                          _bulletInstruction('Una vez activada, regresa a esta aplicación e inicia sesión.'),
-                          const SizedBox(height: 32),
-
-                          // Botón Reenviar Correo
-                          ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF001524),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                side: const BorderSide(color: Color(0xFF1E3A52)),
-                              ),
-                              elevation: 0,
-                            ),
-                            onPressed: authState.status == AuthStatus.loading
-                                ? null
-                                : () => ref.read(authProvider.notifier).resendVerification(email),
-                            child: authState.status == AuthStatus.loading
-                                ? const SizedBox(
-                                    width: 24,
-                                    height: 24,
-                                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                                  )
-                                : const Text(
-                                    'Reenviar Correo de Activación',
-                                    style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00BFA5)),
-                                  ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 32),
-
-                    // Botón para volver a Iniciar Sesión (Gradiente Mint Green)
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        backgroundColor: Colors.transparent,
-                        shadowColor: Colors.transparent,
-                        elevation: 0,
-                      ),
-                      onPressed: () => context.go('/login'),
-                      child: Ink(
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            colors: [Color(0xFF00BFA5), Color(0xFF00897B)], // Gradiente de la paleta
-                          ),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Container(
-                          height: 52,
-                          alignment: Alignment.center,
-                          child: const Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.arrow_back, color: Colors.white),
-                              SizedBox(width: 12),
-                              Text(
-                                'Regresar al Login',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 0.5,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-          ],
-        ),
-      );
+        ],
+      ),
+    );
   }
 
-  Widget _bulletInstruction(String text) {
+  // ══════════════════════════════════════════════════════════════════
+  // STEP INDICATOR
+  // ══════════════════════════════════════════════════════════════════
+  Widget _buildStepIndicator() {
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        const Icon(Icons.arrow_right_alt, color: Color(0xFF00BFA5), size: 20),
-        const SizedBox(width: 8),
-        Expanded(
+        // Step 1 – Completed
+        _buildStepCircle(
+          label: 'DATOS',
+          stepNumber: '1',
+          isCompleted: true,
+          isActive: false,
+        ),
+        _buildStepConnector(isCompleted: true),
+        // Step 2 – Active
+        _buildStepCircle(
+          label: 'VERIFICAR',
+          stepNumber: '2',
+          isCompleted: false,
+          isActive: true,
+        ),
+        _buildStepConnector(isCompleted: false),
+        // Step 3 – Inactive
+        _buildStepCircle(
+          label: 'LISTO',
+          stepNumber: '3',
+          isCompleted: false,
+          isActive: false,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStepCircle({
+    required String label,
+    required String stepNumber,
+    required bool isCompleted,
+    required bool isActive,
+  }) {
+    final bool highlighted = isCompleted || isActive;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: highlighted ? _mint : _navy950,
+            border: Border.all(
+              color: highlighted ? _mint : _border,
+              width: 2,
+            ),
+          ),
+          child: Center(
+            child: isCompleted
+                ? const Icon(Icons.check, color: _navy950, size: 18)
+                : Text(
+                    stepNumber,
+                    style: TextStyle(
+                      color: highlighted ? _slate100 : _slate600,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          label,
+          style: TextStyle(
+            color: highlighted ? _mint : _slate600,
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 0.8,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStepConnector({required bool isCompleted}) {
+    return Container(
+      width: 48,
+      height: 2,
+      margin: const EdgeInsets.only(bottom: 20, left: 8, right: 8),
+      decoration: BoxDecoration(
+        color: isCompleted ? _mint : _border,
+        borderRadius: BorderRadius.circular(1),
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // BANNERS
+  // ══════════════════════════════════════════════════════════════════
+  Widget _buildSuccessBanner(String message) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _mint.withOpacity(0.1),
+        border: Border.all(color: _mint.withOpacity(0.3)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.check_circle_outline, color: _mint, size: 24),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(color: _slate100, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorBanner(String message) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: _errorRed.withOpacity(0.1),
+        border: Border.all(color: _errorRed.withOpacity(0.3)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline, color: _errorRed, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(color: _errorText, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // MAIN CARD
+  // ══════════════════════════════════════════════════════════════════
+  Widget _buildMainCard(AuthState authState) {
+    final maskedEmail = _maskEmail(widget.email);
+    final domain = _emailDomain(widget.email);
+
+    return Container(
+      padding: const EdgeInsets.all(32),
+      decoration: BoxDecoration(
+        color: _navy900.withOpacity(0.85),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: _border, width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: _navy950.withOpacity(0.3),
+            blurRadius: 30,
+            offset: const Offset(0, 15),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // ── Small IronLink logo ──
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: _slate100.withOpacity(0.04),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _border, width: 1),
+            ),
+            child: Image.asset(
+              'assets/logo.png',
+              width: 150,
+              height: 100,
+              fit: BoxFit.contain,
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // ── Email icon container ──
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: _mint.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: _mint.withOpacity(0.25),
+                width: 1,
+              ),
+            ),
+            child: const Center(
+              child: Icon(
+                Icons.email_outlined,
+                color: _mint,
+                size: 32,
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // ── Title ──
+          const Text(
+            'Verifica tu correo',
+            style: TextStyle(
+              color: _slate100,
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.3,
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // ── Subtitle with masked email ──
+          RichText(
+            textAlign: TextAlign.center,
+            text: TextSpan(
+              style: const TextStyle(
+                color: _slate400,
+                fontSize: 14,
+                height: 1.5,
+              ),
+              children: [
+                const TextSpan(
+                  text: 'Ingresa el código de 6 dígitos que enviamos a ',
+                ),
+                TextSpan(
+                  text: maskedEmail,
+                  style: const TextStyle(
+                    color: _mint,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const TextSpan(text: ' para activar tu cuenta.'),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // ── Info box ──
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: _mint.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: _mint.withOpacity(0.3),
+                width: 1,
+              ),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(
+                  Icons.info_outline,
+                  color: _mint,
+                  size: 20,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: RichText(
+                    text: TextSpan(
+                      style: const TextStyle(
+                        color: _slate400,
+                        fontSize: 13,
+                        height: 1.5,
+                      ),
+                      children: [
+                        TextSpan(
+                          text: 'El código fue enviado a tu correo $domain. '
+                              'Revisa también tu carpeta de spam. '
+                              'El código expira en ',
+                        ),
+                        const TextSpan(
+                          text: '10 minutos',
+                          style: TextStyle(
+                            color: _mint,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const TextSpan(text: '.'),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 28),
+
+          // ── OTP Input ──
+          _buildOtpInput(),
+          const SizedBox(height: 20),
+
+          // ── Resend row ──
+          _buildResendRow(),
+          const SizedBox(height: 28),
+
+          // ── Primary button: Verificar y crear cuenta ──
+          _buildPrimaryButton(authState),
+          const SizedBox(height: 12),
+
+          // ── Secondary button: Volver y editar datos ──
+          _buildSecondaryButton(),
+        ],
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // OTP INPUT (6 boxes)
+  // ══════════════════════════════════════════════════════════════════
+  Widget _buildOtpInput() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: List.generate(6, (index) {
+        return Container(
+          width: 52,
+          height: 56,
+          margin: EdgeInsets.only(right: index < 5 ? 8 : 0),
+          child: TextFormField(
+            controller: _otpControllers[index],
+            focusNode: _otpFocusNodes[index],
+            keyboardType: TextInputType.number,
+            textAlign: TextAlign.center,
+            maxLength: 1,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            style: const TextStyle(
+              color: _slate100,
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+            ),
+            decoration: InputDecoration(
+              counterText: '',
+              filled: true,
+              fillColor: _navy950,
+              contentPadding: const EdgeInsets.symmetric(vertical: 14),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(
+                  color: _otpControllers[index].text.isNotEmpty
+                      ? _mint
+                      : _border,
+                  width: 1.5,
+                ),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(
+                  color: _mint,
+                  width: 2,
+                ),
+              ),
+            ),
+            onChanged: (value) {
+              setState(() {}); // rebuild to update border colors
+              if (value.isNotEmpty && index < 5) {
+                _otpFocusNodes[index + 1].requestFocus();
+              }
+              if (value.isEmpty && index > 0) {
+                _otpFocusNodes[index - 1].requestFocus();
+              }
+            },
+          ),
+        );
+      }),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // RESEND ROW
+  // ══════════════════════════════════════════════════════════════════
+  Widget _buildResendRow() {
+    final canResend = _secondsRemaining <= 0;
+    final timerText = '0:${_secondsRemaining.toString().padLeft(2, '0')}';
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Text(
+          '¿No recibiste el código? ',
+          style: TextStyle(color: _slate400, fontSize: 13),
+        ),
+        GestureDetector(
+          onTap: canResend ? _handleResend : null,
           child: Text(
-            text,
-            style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13, height: 1.4),
+            canResend ? 'Reenviar' : 'Reenviar ($timerText)',
+            style: TextStyle(
+              color: canResend
+                  ? _mint
+                  : _slate600,
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // PRIMARY BUTTON
+  // ══════════════════════════════════════════════════════════════════
+  Widget _buildPrimaryButton(AuthState authState) {
+    final isLoading = authState.status == AuthStatus.loading;
+
+    return SizedBox(
+      width: double.infinity,
+      height: 52,
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          padding: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          backgroundColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          elevation: 0,
+          disabledBackgroundColor: Colors.transparent,
+        ),
+        onPressed: (_isOtpComplete && !isLoading)
+            ? () => context.go('/login')
+            : null,
+        child: Ink(
+          decoration: BoxDecoration(
+            gradient: (_isOtpComplete && !isLoading)
+                ? const LinearGradient(
+                    colors: [_mint, _darkMint],
+                  )
+                : LinearGradient(
+                    colors: [
+                      _mint.withOpacity(0.3),
+                      _darkMint.withOpacity(0.3),
+                    ],
+                  ),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Container(
+            height: 52,
+            alignment: Alignment.center,
+            child: isLoading
+                ? const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      color: _slate100,
+                      strokeWidth: 2.5,
+                    ),
+                  )
+                : Text(
+                    'Verificar y crear cuenta →',
+                    style: TextStyle(
+                      color: (_isOtpComplete && !isLoading)
+                          ? _slate100
+                          : _slate100.withOpacity(0.5),
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // SECONDARY BUTTON
+  // ══════════════════════════════════════════════════════════════════
+  Widget _buildSecondaryButton() {
+    return SizedBox(
+      width: double.infinity,
+      height: 52,
+      child: OutlinedButton(
+        style: OutlinedButton.styleFrom(
+          backgroundColor: _navy950,
+          side: const BorderSide(color: _border, width: 1.5),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+        onPressed: () => context.go('/register'),
+        child: const Text(
+          '← Volver y editar datos',
+          style: TextStyle(
+            color: _slate100,
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // FOOTER
+  // ══════════════════════════════════════════════════════════════════
+  Widget _buildFooter() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Container(
+          width: 6,
+          height: 6,
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            color: _mint,
+          ),
+        ),
+        const SizedBox(width: 8),
+        const Text(
+          'Registro exclusivo · IronLink · Acceso institucional',
+          style: TextStyle(
+            color: _slate600,
+            fontSize: 12,
           ),
         ),
       ],
