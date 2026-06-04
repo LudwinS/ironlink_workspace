@@ -214,7 +214,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                               const SizedBox(height: 6),
                               const Center(
                                 child: Text(
-                                  'Registro institucional · IronLink',
+                                  'Registro seguro · IronLink',
                                   style: TextStyle(
                                     color: _slate400,
                                     fontSize: 14,
@@ -419,7 +419,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                           ),
                           const SizedBox(width: 8),
                           const Text(
-                            'Registro exclusivo · IronLink · Acceso institucional',
+                            'Registro seguro · IronLink · Cifrado AES-256',
                             style: TextStyle(
                               color: _slate600,
                               fontSize: 12,

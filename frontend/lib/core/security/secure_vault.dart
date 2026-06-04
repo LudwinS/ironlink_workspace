@@ -11,6 +11,7 @@ class SecureVault {
   static const String _usernameKey = 'username';
   static const String _emailKey = 'email';
   static const String _roleKey = 'role';
+  static const String _rememberMeKey = 'remember_me';
 
   static Future<void> saveAuthData({
     required String accessToken,
@@ -18,12 +19,14 @@ class SecureVault {
     required String username,
     required String email,
     required String role,
+    bool rememberMe = false,
   }) async {
     await _storage.write(key: _accessTokenKey, value: accessToken);
     await _storage.write(key: _refreshTokenKey, value: refreshToken);
     await _storage.write(key: _usernameKey, value: username);
     await _storage.write(key: _emailKey, value: email);
     await _storage.write(key: _roleKey, value: role);
+    await _storage.write(key: _rememberMeKey, value: rememberMe ? 'true' : 'false');
   }
 
   static Future<String?> getAccessToken() async => await _storage.read(key: _accessTokenKey);
@@ -32,12 +35,18 @@ class SecureVault {
   static Future<String?> getEmail() async => await _storage.read(key: _emailKey);
   static Future<String?> getRole() async => await _storage.read(key: _roleKey);
 
+  static Future<bool> getRememberMe() async {
+    final val = await _storage.read(key: _rememberMeKey);
+    return val == 'true';
+  }
+
   static Future<void> clearAuthData() async {
     await _storage.delete(key: _accessTokenKey);
     await _storage.delete(key: _refreshTokenKey);
     await _storage.delete(key: _usernameKey);
     await _storage.delete(key: _emailKey);
     await _storage.delete(key: _roleKey);
+    await _storage.delete(key: _rememberMeKey);
   }
 
   static Future<bool> hasSession() async {

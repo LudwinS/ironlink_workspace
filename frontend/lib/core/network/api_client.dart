@@ -14,25 +14,31 @@ class ApiClient {
     ),
   );
 
+  static bool _initialized = false;
+
   static Dio get instance {
-    if (_dio.interceptors.isEmpty) {
+    if (!_initialized) {
       _dio.interceptors.add(
         InterceptorsWrapper(
           onRequest: (options, handler) async {
             final accessToken = await SecureVault.getAccessToken();
+            print("ApiClient - Enviando petición a: ${options.path} - Token longitud: ${accessToken?.length ?? 0}");
             if (accessToken != null && accessToken.isNotEmpty) {
               options.headers['Authorization'] = 'Bearer $accessToken';
             }
             return handler.next(options);
           },
           onError: (DioException error, handler) async {
+            print("ApiClient - ERROR en petición a: ${error.requestOptions.path} - Código: ${error.response?.statusCode}");
             if (error.response?.statusCode == 401) {
+              print("ApiClient - ERROR 401: Sesión expirada, borrando datos de SecureVault.");
               await SecureVault.clearAuthData();
             }
             return handler.next(error);
           },
         ),
       );
+      _initialized = true;
     }
     return _dio;
   }

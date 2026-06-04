@@ -2,7 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/iam_repository.dart';
 import '../../../core/security/secure_vault.dart';
 
-enum AuthStatus { initial, loading, unauthenticated, verificationPending, authenticated, error }
+enum AuthStatus { initial, loading, unauthenticated, verificationPending, verified, authenticated, error }
 
 class AuthState {
   final AuthStatus status;
@@ -12,6 +12,8 @@ class AuthState {
   final String? errorMessage;
   final String? successMessage;
   final Map<String, String>? fieldErrors;
+  /// Datos del usuario verificado (name, email, carnet, status) tras verificación exitosa.
+  final Map<String, dynamic>? verifiedUserData;
 
   AuthState({
     this.status = AuthStatus.initial,
@@ -21,6 +23,7 @@ class AuthState {
     this.errorMessage,
     this.successMessage,
     this.fieldErrors,
+    this.verifiedUserData,
   });
 
   AuthState copyWith({
@@ -31,6 +34,7 @@ class AuthState {
     String? errorMessage,
     String? successMessage,
     Map<String, String>? fieldErrors,
+    Map<String, dynamic>? verifiedUserData,
   }) {
     return AuthState(
       status: status ?? this.status,
@@ -40,6 +44,7 @@ class AuthState {
       errorMessage: errorMessage ?? this.errorMessage,
       successMessage: successMessage ?? this.successMessage,
       fieldErrors: fieldErrors ?? this.fieldErrors,
+      verifiedUserData: verifiedUserData ?? this.verifiedUserData,
     );
   }
 }
@@ -53,6 +58,13 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   Future<void> checkPersistedSession() async {
     state = state.copyWith(status: AuthStatus.loading);
+    
+    // Si no se marcó "Recordarme", limpiar los datos al iniciar la app
+    final rememberMe = await SecureVault.getRememberMe();
+    if (!rememberMe) {
+      await SecureVault.clearAuthData();
+    }
+
     final hasSession = await SecureVault.hasSession();
     if (hasSession) {
       final username = await SecureVault.getUsername();
@@ -120,24 +132,102 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
-  Future<bool> login(String email, String password) async {
+  Future<bool> login(String email, String password, {bool rememberMe = false}) async {
     state = state.copyWith(status: AuthStatus.loading, errorMessage: null, successMessage: null, fieldErrors: null);
     try {
-      await _repository.login(email: email, password: password);
-      final username = await SecureVault.getUsername();
-      final userEmail = await SecureVault.getEmail();
-      final role = await SecureVault.getRole();
+      final userData = await _repository.login(email: email, password: password, rememberMe: rememberMe);
 
       state = AuthState(
         status: AuthStatus.authenticated,
-        username: username,
-        email: userEmail,
-        role: role,
+        username: userData['username'],
+        email: userData['email'],
+        role: userData['role'],
       );
       return true;
     } catch (e) {
       state = state.copyWith(
         status: AuthStatus.unauthenticated,
+        errorMessage: e.toString().replaceAll('Exception: ', ''),
+      );
+      return false;
+    }
+  }
+
+  /// Solicita envío de verificación (código o enlace).
+  Future<bool> requestVerification(String email, String method) async {
+    state = state.copyWith(
+      status: AuthStatus.loading,
+      errorMessage: null,
+      successMessage: null,
+    );
+    try {
+      final message = await _repository.requestVerification(
+        email: email,
+        method: method,
+      );
+      state = state.copyWith(
+        status: AuthStatus.verificationPending,
+        email: email,
+        successMessage: message,
+      );
+      return true;
+    } catch (e) {
+      state = state.copyWith(
+        status: AuthStatus.verificationPending,
+        email: email,
+        errorMessage: e.toString().replaceAll('Exception: ', ''),
+      );
+      return false;
+    }
+  }
+
+  /// Verifica el correo con código OTP.
+  Future<bool> verifyEmail(String email, String code) async {
+    state = state.copyWith(
+      status: AuthStatus.loading,
+      errorMessage: null,
+      successMessage: null,
+    );
+    try {
+      final userData = await _repository.verifyEmail(email: email, code: code);
+      state = AuthState(
+        status: AuthStatus.verified,
+        email: email,
+        username: userData['name'],
+        verifiedUserData: userData,
+        successMessage: userData['message'],
+      );
+      return true;
+    } catch (e) {
+      state = state.copyWith(
+        status: AuthStatus.verificationPending,
+        email: email,
+        errorMessage: e.toString().replaceAll('Exception: ', ''),
+      );
+      return false;
+    }
+  }
+
+  /// Verifica el correo mediante token de enlace.
+  Future<bool> verifyLink(String token) async {
+    state = state.copyWith(
+      status: AuthStatus.loading,
+      errorMessage: null,
+      successMessage: null,
+    );
+    try {
+      final userData = await _repository.verifyLink(token);
+      state = AuthState(
+        status: AuthStatus.verified,
+        email: userData['email'],
+        username: userData['name'],
+        verifiedUserData: userData,
+        successMessage: userData['message'],
+      );
+      return true;
+    } catch (e) {
+      state = state.copyWith(
+        status: AuthStatus.error,
         errorMessage: e.toString().replaceAll('Exception: ', ''),
       );
       return false;

@@ -45,6 +45,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       final success = await ref.read(authProvider.notifier).login(
             _emailController.text.trim(),
             _passwordController.text,
+            rememberMe: _rememberMe,
           );
 
       if (success && mounted) {
@@ -631,8 +632,8 @@ class _LeftHeroPanel extends StatelessWidget {
                 ),
                 const SizedBox(height: 20),
                 _buildFeatureBullet(
-                  title: 'Acceso institucional',
-                  subtitle: 'exclusivo para miembros registrados',
+                  title: 'Acceso seguro',
+                  subtitle: 'exclusivo para miembros autorizados',
                 ),
 
                 const Spacer(flex: 3),

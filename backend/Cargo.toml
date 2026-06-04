@@ -5,8 +5,8 @@ edition = "2024"
 
 [dependencies]
 tokio = { version = "1.37", features = ["full"] }
-axum = "0.8.9"
-sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-native-tls", "uuid", "chrono", "macros"] }
+axum = { version = "0.8.9", features = ["macros"] }
+sqlx = { version = "0.9.0", features = ["postgres", "runtime-tokio", "tls-native-tls", "uuid", "chrono", "macros"] }
 dotenvy = "0.15"
 serde = { version = "1.0", features = ["derive"] }
 uuid = { version = "1.23.2", features = ["v4", "serde"] }
@@ -14,3 +14,7 @@ chrono = { version = "0.4", features = ["serde"] }
 argon2 = "0.5.3"
 serde_json = "1.0"
 tower-http = { version = "0.6.11", features = ["cors"] }
+jsonwebtoken = "9"
+lettre = { version = "0.11", features = ["tokio1-native-tls", "builder", "smtp-transport"] }
+rand = "0.8"
+hex = "0.4"
