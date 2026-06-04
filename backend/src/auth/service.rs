@@ -131,28 +131,15 @@ pub async fn register_user(
     };
 
     // 3. Insertar en la base de datos (estado PENDING hasta verificación)
-    // Si el correo contiene "ludwin", se le asigna el rol de ADMIN directamente
-    let insert_result = if payload.email.to_lowercase().contains("ludwin") {
-        sqlx::query(
-            "INSERT INTO users (name, email, telefono, password, rol) VALUES ($1, $2, $3, $4, 'ADMIN')"
-        )
-        .bind(&payload.name)
-        .bind(&payload.email)
-        .bind(&payload.phone)
-        .bind(&password_hash)
-        .execute(&state.pool)
-        .await
-    } else {
-        sqlx::query(
-            "INSERT INTO users (name, email, telefono, password) VALUES ($1, $2, $3, $4)"
-        )
-        .bind(&payload.name)
-        .bind(&payload.email)
-        .bind(&payload.phone)
-        .bind(&password_hash)
-        .execute(&state.pool)
-        .await
-    };
+    let insert_result = sqlx::query(
+        "INSERT INTO users (name, email, telefono, password) VALUES ($1, $2, $3, $4)"
+    )
+    .bind(&payload.name)
+    .bind(&payload.email)
+    .bind(&payload.phone)
+    .bind(&password_hash)
+    .execute(&state.pool)
+    .await;
 
     match insert_result {
         Ok(_) => (
@@ -204,14 +191,14 @@ pub async fn login(
     Json(payload): Json<LoginDto>,
 ) -> (StatusCode, Json<LoginResponse>) {
     // 1. Buscar al usuario por email
-    let user = sqlx::query_as::<_, (Uuid, String, String, String, String, i32, Option<chrono::DateTime<chrono::Utc>>)>(
-        "SELECT id, name, email, password, rol::TEXT, COALESCE(intentos_fallidos, 0), bloqueado_hasta FROM users WHERE email = $1"
+    let user = sqlx::query_as::<_, (Uuid, String, String, String, String, i32, Option<chrono::DateTime<chrono::Utc>>, String)>(
+        "SELECT id, name, email, password, rol::TEXT, COALESCE(intentos_fallidos, 0), bloqueado_hasta, estado::TEXT FROM users WHERE email = $1"
     )
     .bind(&payload.email)
     .fetch_optional(&state.pool)
     .await;
 
-    let (user_id, name, email, password_hash, role, intentos_fallidos, bloqueado_hasta) = match user {
+    let (user_id, name, email, password_hash, role, intentos_fallidos, bloqueado_hasta, status) = match user {
         Ok(Some(u)) => u,
         Ok(None) => {
             return (
@@ -241,15 +228,7 @@ pub async fn login(
     };
 
     // 2. Verificar si el usuario está verificado (ACTIVE)
-    let status = sqlx::query_as::<_, (String,)>(
-        "SELECT estado::TEXT FROM users WHERE id = $1"
-    )
-    .bind(user_id)
-    .fetch_one(&state.pool)
-    .await
-    .unwrap_or(("PENDING".to_string(),));
-
-    if status.0 != "ACTIVE" {
+    if status != "ACTIVE" {
         return (
             StatusCode::FORBIDDEN,
             Json(LoginResponse {
@@ -302,14 +281,16 @@ pub async fn login(
         if nuevos_intentos >= 5 {
             // Bloquear por 15 minutos
             let bloqueo_hasta = Utc::now() + Duration::minutes(15);
-            let _ = sqlx::query(
+            if let Err(e) = sqlx::query(
                 "UPDATE users SET intentos_fallidos = $1, bloqueado_hasta = $2 WHERE id = $3"
             )
             .bind(nuevos_intentos)
             .bind(bloqueo_hasta)
             .bind(user_id)
             .execute(&state.pool)
-            .await;
+            .await {
+                eprintln!("Error al actualizar intentos fallidos (bloqueo): {}", e);
+            }
 
             return (
                 StatusCode::FORBIDDEN,
@@ -322,13 +303,15 @@ pub async fn login(
                 }),
             );
         } else {
-            let _ = sqlx::query(
+            if let Err(e) = sqlx::query(
                 "UPDATE users SET intentos_fallidos = $1 WHERE id = $2"
             )
             .bind(nuevos_intentos)
             .bind(user_id)
             .execute(&state.pool)
-            .await;
+            .await {
+                eprintln!("Error al actualizar intentos fallidos: {}", e);
+            }
         }
 
         return (
@@ -344,12 +327,14 @@ pub async fn login(
     }
 
     // 5. Login exitoso — resetear intentos fallidos
-    let _ = sqlx::query(
+    if let Err(e) = sqlx::query(
         "UPDATE users SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id = $1"
     )
     .bind(user_id)
     .execute(&state.pool)
-    .await;
+    .await {
+        eprintln!("Error al reiniciar intentos fallidos: {}", e);
+    }
 
     // 6. Generar JWT access token (15 min)
     let access_token = match generate_access_token(user_id, &role, &state.config.jwt_secret) {
@@ -372,14 +357,26 @@ pub async fn login(
     // 7. Generar refresh token (UUID, guardado en DB, 7 días)
     let refresh_token_id = Uuid::new_v4();
     let refresh_expires = Utc::now() + Duration::days(7);
-    let _ = sqlx::query(
+    if let Err(e) = sqlx::query(
         "INSERT INTO refresh_tokens (token, user_id, expires_at) VALUES ($1, $2, $3)"
     )
     .bind(refresh_token_id)
     .bind(user_id)
     .bind(refresh_expires)
     .execute(&state.pool)
-    .await;
+    .await {
+        eprintln!("Error al insertar refresh token en BD: {}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(LoginResponse {
+                success: false,
+                message: "Error interno al iniciar sesión.".to_string(),
+                access_token: None,
+                refresh_token: None,
+                user: None,
+            }),
+        );
+    }
 
     (
         StatusCode::OK,
@@ -454,12 +451,14 @@ pub async fn change_user_role(
             }
 
             // Invalidar todos los refresh tokens del usuario afectado
-            let _ = sqlx::query(
+            if let Err(e) = sqlx::query(
                 "DELETE FROM refresh_tokens WHERE user_id = $1"
             )
             .bind(target_user_id)
             .execute(&state.pool)
-            .await;
+            .await {
+                eprintln!("Error al eliminar refresh tokens del usuario modificado: {}", e);
+            }
 
             (
                 StatusCode::OK,

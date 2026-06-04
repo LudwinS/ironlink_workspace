@@ -1,29 +1,57 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../features/iam/presentation/login_screen.dart';
 import '../../features/iam/presentation/register_screen.dart';
 import '../../features/iam/presentation/verification_screen.dart';
 import '../../features/iam/presentation/verification_success_screen.dart';
 import '../../features/nodos/presentation/dashboard_screen.dart';
-import '../security/secure_vault.dart';
+import '../../features/iam/providers/auth_provider.dart';
 
-class AppRouter {
-  static final GoRouter router = GoRouter(
+final routerNotifierProvider = Provider<RouterNotifier>((ref) {
+  final notifier = RouterNotifier();
+  ref.listen<AuthState>(authProvider, (previous, next) {
+    print("DEBUG: RouterNotifier - authProvider status changed: ${previous?.status} -> ${next.status}");
+    notifier.notify();
+  });
+  return notifier;
+});
+
+class RouterNotifier extends ChangeNotifier {
+  void notify() {
+    notifyListeners();
+  }
+}
+
+final routerProvider = Provider<GoRouter>((ref) {
+  final routerNotifier = ref.watch(routerNotifierProvider);
+
+  return GoRouter(
     initialLocation: '/login',
-    redirect: (BuildContext context, GoRouterState state) async {
-      final isLoggedIn = await SecureVault.hasSession();
+    refreshListenable: routerNotifier,
+    redirect: (BuildContext context, GoRouterState state) {
+      final authState = ref.read(authProvider);
+      final isLoggedIn = authState.status == AuthStatus.authenticated;
+      
+      print("DEBUG: RouterRedirect - matchedLocation: ${state.matchedLocation}, isLoggedIn: $isLoggedIn (status: ${authState.status})");
+      
       final isGoingToAuth = state.matchedLocation == '/login' ||
           state.matchedLocation == '/register' ||
           state.matchedLocation == '/verification' ||
           state.matchedLocation == '/verification-success';
 
       if (!isLoggedIn) {
-        if (!isGoingToAuth) return '/login';
+        if (!isGoingToAuth) {
+          print("DEBUG: RouterRedirect - No está logueado y va a ruta protegida. Redirigiendo a /login");
+          return '/login';
+        }
       } else {
         if (isGoingToAuth && state.matchedLocation != '/verification') {
+          print("DEBUG: RouterRedirect - Está logueado e iba a Auth. Redirigiendo a /home");
           return '/home';
         }
       }
+      print("DEBUG: RouterRedirect - No se requiere redirección. Retornando null");
       return null;
     },
     routes: [
@@ -52,4 +80,4 @@ class AppRouter {
       ),
     ],
   );
-}
+});

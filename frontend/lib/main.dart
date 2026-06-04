@@ -12,17 +12,19 @@ void main() {
   );
 }
 
-class IronLinkApp extends StatelessWidget {
+class IronLinkApp extends ConsumerWidget {
   const IronLinkApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final router = ref.watch(routerProvider);
+
     return MaterialApp.router(
       title: 'IronLink Portal',
       debugShowCheckedModeBanner: false,
       
       // Enrutador de GoRouter
-      routerConfig: AppRouter.router,
+      routerConfig: router,
       
       // Tema Oscuro Premium Integrado con la Paleta de la Marca (Mint Green & Tech Navy)
       themeMode: ThemeMode.dark,

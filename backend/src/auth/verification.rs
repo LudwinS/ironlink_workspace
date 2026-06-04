@@ -15,7 +15,8 @@ use crate::mailer;
 #[derive(Clone)]
 pub struct AppState {
     pub pool: PgPool,
-    pub config: AppConfig,
+    pub config: std::sync::Arc<AppConfig>,
+    pub mailer: mailer::SmtpMailer,
 }
 
 // ─── DTOs ────────────────────────────────────────────────────────────────
@@ -99,15 +100,29 @@ pub async fn request_verification(
     }
 
     // 2. Verificar límite de 3 solicitudes por hora
-    let count: (i64,) = sqlx::query_as(
+    let count_result = sqlx::query_as::<_, (i64,)>(
         "SELECT COUNT(*) FROM verification_tokens WHERE user_id = $1 AND created_at > NOW() - INTERVAL '1 hour'"
     )
     .bind(user_id)
     .fetch_one(&state.pool)
-    .await
-    .unwrap_or((0,));
+    .await;
 
-    if count.0 >= 3 {
+    let count = match count_result {
+        Ok(c) => c.0,
+        Err(e) => {
+            eprintln!("Error al verificar límite de solicitudes: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    success: false,
+                    message: "Error interno al procesar la verificación.".to_string(),
+                    field_errors: None,
+                }),
+            );
+        }
+    };
+
+    if count >= 3 {
         return (
             StatusCode::TOO_MANY_REQUESTS,
             Json(ApiResponse {
@@ -125,8 +140,9 @@ pub async fn request_verification(
         // Generar token de 64 caracteres hexadecimales (32 bytes)
         let token_hex = {
             let mut rng = rand::thread_rng();
-            let random_bytes: Vec<u8> = (0..32).map(|_| rng.r#gen::<u8>()).collect();
-            hex::encode(&random_bytes)
+            let mut bytes = [0u8; 32];
+            rng.fill(&mut bytes);
+            hex::encode(bytes)
         };
         let code = "000000"; // Placeholder, no se usa para links
 
@@ -140,7 +156,8 @@ pub async fn request_verification(
         .execute(&state.pool)
         .await;
 
-        if insert_result.is_err() {
+        if let Err(e) = insert_result {
+            eprintln!("Error al generar el token de verificación: {}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiResponse {
@@ -152,8 +169,8 @@ pub async fn request_verification(
         }
 
         // Enviar enlace por correo
-        let link = format!("http://localhost:8080/verify-link/{}", token_hex);
-        if let Err(e) = mailer::send_verification_link(&state.config, &payload.email, &link).await {
+        let link = format!("{}/verify-link/{}", state.config.app_base_url, token_hex);
+        if let Err(e) = mailer::send_verification_link(&state.mailer, &state.config.smtp_from, &payload.email, &link).await {
             eprintln!("Error al enviar correo de verificación: {}", e);
             // No retornamos error al usuario por temas de seguridad, el token queda guardado
         }
@@ -172,7 +189,8 @@ pub async fn request_verification(
         .execute(&state.pool)
         .await;
 
-        if insert_result.is_err() {
+        if let Err(e) = insert_result {
+            eprintln!("Error al generar el código de verificación: {}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiResponse {
@@ -184,7 +202,7 @@ pub async fn request_verification(
         }
 
         // Enviar código por correo
-        if let Err(e) = mailer::send_verification_code(&state.config, &payload.email, &code).await {
+        if let Err(e) = mailer::send_verification_code(&state.mailer, &state.config.smtp_from, &payload.email, &code).await {
             eprintln!("Error al enviar correo de verificación: {}", e);
         }
     }
@@ -287,17 +305,71 @@ pub async fn verify_email(
         }
     };
 
+    // Iniciar transacción
+    let mut tx = match state.pool.begin().await {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("Error al iniciar transacción en verify_email: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(VerifyResponse {
+                    success: false,
+                    message: "Error interno al iniciar la verificación.".to_string(),
+                    user: None,
+                }),
+            );
+        }
+    };
+
     // 3. Marcar usuario como ACTIVE
-    let _ = sqlx::query("UPDATE users SET estado = 'ACTIVE' WHERE id = $1")
+    let update_res = sqlx::query("UPDATE users SET estado = 'ACTIVE' WHERE id = $1")
         .bind(user_id)
-        .execute(&state.pool)
+        .execute(&mut *tx)
         .await;
 
+    if let Err(e) = update_res {
+        eprintln!("Error al actualizar estado del usuario a ACTIVE: {}", e);
+        let _ = tx.rollback().await;
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(VerifyResponse {
+                success: false,
+                message: "Error interno al activar la cuenta.".to_string(),
+                user: None,
+            }),
+        );
+    }
+
     // 4. Eliminar el token usado
-    let _ = sqlx::query("DELETE FROM verification_tokens WHERE id = $1")
+    let delete_res = sqlx::query("DELETE FROM verification_tokens WHERE id = $1")
         .bind(token_id)
-        .execute(&state.pool)
+        .execute(&mut *tx)
         .await;
+
+    if let Err(e) = delete_res {
+        eprintln!("Error al eliminar el token de verificación usado: {}", e);
+        let _ = tx.rollback().await;
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(VerifyResponse {
+                success: false,
+                message: "Error interno al limpiar el código de verificación.".to_string(),
+                user: None,
+            }),
+        );
+    }
+
+    if let Err(e) = tx.commit().await {
+        eprintln!("Error al confirmar transacción en verify_email: {}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(VerifyResponse {
+                success: false,
+                message: "Error interno al completar la verificación.".to_string(),
+                user: None,
+            }),
+        );
+    }
 
     (
         StatusCode::OK,
@@ -374,17 +446,71 @@ pub async fn verify_link(
         }
     };
 
+    // Iniciar transacción
+    let mut tx = match state.pool.begin().await {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("Error al iniciar transacción en verify_link: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(VerifyResponse {
+                    success: false,
+                    message: "Error interno al iniciar la verificación.".to_string(),
+                    user: None,
+                }),
+            );
+        }
+    };
+
     // 3. Marcar usuario como ACTIVE
-    let _ = sqlx::query("UPDATE users SET estado = 'ACTIVE' WHERE id = $1")
+    let update_res = sqlx::query("UPDATE users SET estado = 'ACTIVE' WHERE id = $1")
         .bind(user_id)
-        .execute(&state.pool)
+        .execute(&mut *tx)
         .await;
 
+    if let Err(e) = update_res {
+        eprintln!("Error al actualizar estado del usuario a ACTIVE: {}", e);
+        let _ = tx.rollback().await;
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(VerifyResponse {
+                success: false,
+                message: "Error interno al activar la cuenta.".to_string(),
+                user: None,
+            }),
+        );
+    }
+
     // 4. Eliminar el token usado
-    let _ = sqlx::query("DELETE FROM verification_tokens WHERE id = $1")
+    let delete_res = sqlx::query("DELETE FROM verification_tokens WHERE id = $1")
         .bind(token_id)
-        .execute(&state.pool)
+        .execute(&mut *tx)
         .await;
+
+    if let Err(e) = delete_res {
+        eprintln!("Error al eliminar el token de verificación usado: {}", e);
+        let _ = tx.rollback().await;
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(VerifyResponse {
+                success: false,
+                message: "Error interno al limpiar el enlace de verificación.".to_string(),
+                user: None,
+            }),
+        );
+    }
+
+    if let Err(e) = tx.commit().await {
+        eprintln!("Error al confirmar transacción en verify_link: {}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(VerifyResponse {
+                success: false,
+                message: "Error interno al completar la verificación.".to_string(),
+                user: None,
+            }),
+        );
+    }
 
     (
         StatusCode::OK,

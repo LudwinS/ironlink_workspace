@@ -3,21 +3,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/widgets/no_scrollbar_behavior.dart';
+import '../../../core/theme/app_colors.dart';
 import '../providers/auth_provider.dart';
 
 // Color Palette Constants
-const _navy950 = Color(0xFF03101E);
-const _navy900 = Color(0xFF071B2D);
-const _border = Color(0xFF103A5C);
-const _mint = Color(0xFF14E3A4);
-const _darkMint = Color(0xFF0A5C52);
-const _cyan = Color(0xFF00FFD0);
-const _slate100 = Color(0xFFF1F5F9);
-const _slate400 = Color(0xFF94A3B8);
-const _slate500 = Color(0xFF475569);
-const _slate600 = Color(0xFF64748B);
-const _errorRed = Color(0xFFEF4444);
-const _errorText = Color(0xFFFCA5A5);
+const _navy950 = AppColors.navy950;
+const _navy900 = AppColors.navy900;
+const _border = AppColors.border;
+const _mint = AppColors.mint;
+const _darkMint = AppColors.darkMint;
+const _cyan = AppColors.cyan;
+const _slate100 = AppColors.slate100;
+const _slate400 = AppColors.slate400;
+const _slate500 = AppColors.slate500;
+const _slate600 = AppColors.slate600;
+const _errorRed = AppColors.errorRed;
+const _errorText = AppColors.errorText;
 
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});

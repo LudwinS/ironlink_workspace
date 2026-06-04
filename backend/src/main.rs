@@ -1,6 +1,6 @@
 use axum::{
     middleware,
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
     Router,
 };
 use std::net::SocketAddr;
@@ -17,12 +17,13 @@ use auth::verification::AppState;
 #[tokio::main]
 async fn main() {
     // 1. Cargar variables de entorno
-    dotenvy::dotenv().expect("Abortando, no se encontró el archivo .env en la raíz del backend");
+    dotenvy::dotenv().ok();
 
     println!("Inicializando IronLink Backend...");
 
     // 2. Cargar configuración desde variables de entorno
     let app_config = config::AppConfig::from_env();
+    let app_config_arc = std::sync::Arc::new(app_config);
     println!("Configuración cargada correctamente.");
 
     // 3. Conectar a la base de datos (PgPool)
@@ -38,10 +39,15 @@ async fn main() {
         Err(e) => println!("Advertencia/Error al ejecutar migraciones: {}", e),
     }
 
+    // Inicializar el mailer SMTP global
+    let mailer = mailer::create_mailer(&app_config_arc)
+        .expect("Error crítico al inicializar el mailer SMTP global");
+
     // 4. Crear estado compartido de la aplicación
     let app_state = AppState {
         pool,
-        config: app_config.clone(),
+        config: app_config_arc.clone(),
+        mailer,
     };
 
     // 5. Configurar CORS
@@ -63,6 +69,7 @@ async fn main() {
         .route("/nodos", post(nodos::service::create_nodo))
         .route("/nodos", get(nodos::service::list_nodos))
         .route("/nodos/join/{token}", post(nodos::service::join_nodo))
+        .route("/nodos/{id}", delete(nodos::service::delete_nodo))
         .layer(middleware::from_fn(auth::middleware::jwt_auth));
 
     // 8. Rutas de administrador (requieren JWT + rol ADMIN)
@@ -77,7 +84,7 @@ async fn main() {
         .merge(protected_routes)
         .merge(admin_routes)
         .layer(cors)
-        .layer(axum::Extension(app_config))
+        .layer(axum::Extension(app_config_arc))
         .with_state(app_state);
 
     // 10. Configurar la dirección local (localhost en el puerto 8080)

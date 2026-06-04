@@ -15,6 +15,7 @@ class Nodo {
   final int miembrosCount;
   final String? creadorNombre;
   final DateTime createdAt;
+  final String? rol;
 
   const Nodo({
     required this.id,
@@ -26,6 +27,7 @@ class Nodo {
     required this.miembrosCount,
     this.creadorNombre,
     required this.createdAt,
+    this.rol,
   });
 
   factory Nodo.fromJson(Map<String, dynamic> json) {
@@ -41,6 +43,7 @@ class Nodo {
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at'].toString()) ?? DateTime.now()
           : DateTime.now(),
+      rol: json['rol'] as String?,
     );
   }
 
@@ -54,6 +57,7 @@ class Nodo {
         'miembros_count': miembrosCount,
         'creador_nombre': creadorNombre,
         'created_at': createdAt.toIso8601String(),
+        'rol': rol,
       };
 
   bool get isActive => estado == 'active';
@@ -146,6 +150,17 @@ class NodosRepository {
       throw Exception('Respuesta inesperada del servidor al unirse al nodo');
     } on DioException catch (e) {
       final msg = _extractErrorMessage(e, 'Error al unirse al nodo');
+      throw Exception(msg);
+    }
+  }
+
+  /// Elimina un nodo por su ID.
+  /// DELETE /nodos/:id
+  Future<void> deleteNodo(String id) async {
+    try {
+      await _client.delete('/nodos/$id');
+    } on DioException catch (e) {
+      final msg = _extractErrorMessage(e, 'Error al eliminar el nodo');
       throw Exception(msg);
     }
   }

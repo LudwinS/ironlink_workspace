@@ -41,8 +41,9 @@ pub struct NodoInfo {
 /// Genera un token de acceso aleatorio de 32 caracteres hexadecimales
 fn generate_access_token() -> String {
     let mut rng = rand::thread_rng();
-    let bytes: Vec<u8> = (0..16).map(|_| rng.r#gen::<u8>()).collect();
-    hex::encode(&bytes)
+    let mut bytes = [0u8; 16];
+    rng.fill(&mut bytes);
+    hex::encode(bytes)
 }
 
 // ─── POST /nodos ─────────────────────────────────────────────────────────
@@ -54,6 +55,23 @@ pub async fn create_nodo(
 ) -> (StatusCode, Json<NodoResponse>) {
     let token_acceso = generate_access_token();
 
+    // Iniciar transacción
+    let mut tx = match state.pool.begin().await {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("Error al iniciar transacción al crear nodo: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(NodoResponse {
+                    success: false,
+                    message: "Error interno al iniciar la creación del nodo.".to_string(),
+                    nodo: None,
+                    nodos: None,
+                }),
+            );
+        }
+    };
+
     let result = sqlx::query_as::<_, (Uuid, String, Option<String>, String, Uuid, String)>(
         "INSERT INTO nodos (nombre, descripcion, token_acceso, creador_id) VALUES ($1, $2, $3, $4) RETURNING id, nombre, descripcion, token_acceso, creador_id, estado"
     )
@@ -61,19 +79,46 @@ pub async fn create_nodo(
     .bind(&payload.descripcion)
     .bind(&token_acceso)
     .bind(auth_user.user_id)
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await;
 
     match result {
         Ok((id, nombre, descripcion, token_acceso, creador_id, estado)) => {
             // También agregar al creador como miembro con rol OWNER
-            let _ = sqlx::query(
+            let member_result = sqlx::query(
                 "INSERT INTO nodo_miembros (nodo_id, user_id, rol) VALUES ($1, $2, 'OWNER')"
             )
             .bind(id)
             .bind(auth_user.user_id)
-            .execute(&state.pool)
+            .execute(&mut *tx)
             .await;
+
+            if let Err(e) = member_result {
+                eprintln!("Error al asociar miembro creador: {}", e);
+                let _ = tx.rollback().await;
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(NodoResponse {
+                        success: false,
+                        message: "Error interno al asociar el creador al nodo.".to_string(),
+                        nodo: None,
+                        nodos: None,
+                    }),
+                );
+            }
+
+            if let Err(e) = tx.commit().await {
+                eprintln!("Error al confirmar transacción del nodo: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(NodoResponse {
+                        success: false,
+                        message: "Error interno al confirmar la creación del nodo.".to_string(),
+                        nodo: None,
+                        nodos: None,
+                    }),
+                );
+            }
 
             (
                 StatusCode::CREATED,
@@ -96,10 +141,11 @@ pub async fn create_nodo(
         }
         Err(e) => {
             eprintln!("Error al crear nodo: {}", e);
+            let _ = tx.rollback().await;
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(NodoResponse {
-                    success: true,
+                    success: false,
                     message: "Error interno al crear el nodo.".to_string(),
                     nodo: None,
                     nodos: None,
@@ -290,3 +336,94 @@ pub async fn join_nodo(
         }
     }
 }
+
+// ─── DELETE /nodos/{id} ──────────────────────────────────────────────────
+
+pub async fn delete_nodo(
+    State(state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
+    axum::extract::Path(id): axum::extract::Path<Uuid>,
+) -> (StatusCode, Json<NodoResponse>) {
+    // 1. Verificar si el nodo existe y quién es el creador
+    let creator_check = sqlx::query_as::<_, (Uuid,)>(
+        "SELECT creador_id FROM nodos WHERE id = $1"
+    )
+    .bind(id)
+    .fetch_optional(&state.pool)
+    .await;
+
+    let creador_id = match creator_check {
+        Ok(Some((c_id,))) => c_id,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(NodoResponse {
+                    success: false,
+                    message: "No se encontró el nodo especificado.".to_string(),
+                    nodo: None,
+                    nodos: None,
+                }),
+            );
+        }
+        Err(e) => {
+            eprintln!("Error al verificar el creador del nodo: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(NodoResponse {
+                    success: false,
+                    message: "Error interno al verificar el nodo.".to_string(),
+                    nodo: None,
+                    nodos: None,
+                }),
+            );
+        }
+    };
+
+    // 2. Comprobar permisos (creador del nodo o administrador global)
+    if creador_id != auth_user.user_id && auth_user.role != "ADMIN" {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(NodoResponse {
+                success: false,
+                message: "No tienes permisos para eliminar este nodo.".to_string(),
+                nodo: None,
+                nodos: None,
+            }),
+        );
+    }
+
+    // 3. Eliminar el nodo (el ON DELETE CASCADE se encargará de nodo_miembros)
+    let delete_result = sqlx::query(
+        "DELETE FROM nodos WHERE id = $1"
+    )
+    .bind(id)
+    .execute(&state.pool)
+    .await;
+
+    match delete_result {
+        Ok(_) => {
+            (
+                StatusCode::OK,
+                Json(NodoResponse {
+                    success: true,
+                    message: "Nodo eliminado exitosamente.".to_string(),
+                    nodo: None,
+                    nodos: None,
+                }),
+            )
+        }
+        Err(e) => {
+            eprintln!("Error al eliminar el nodo: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(NodoResponse {
+                    success: false,
+                    message: "Error interno al eliminar el nodo.".to_string(),
+                    nodo: None,
+                    nodos: None,
+                }),
+            )
+        }
+    }
+}
+

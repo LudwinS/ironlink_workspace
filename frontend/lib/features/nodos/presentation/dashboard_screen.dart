@@ -5,23 +5,25 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/security/secure_vault.dart';
+import '../../../core/theme/app_colors.dart';
 import '../providers/nodos_provider.dart';
 import '../data/nodos_repository.dart';
+import '../../iam/providers/auth_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Paleta de colores oficial IronLink
 // ─────────────────────────────────────────────────────────────────────────────
 
-const _navy950 = Color(0xFF03101E);
-const _navy900 = Color(0xFF071B2D);
-const _border = Color(0xFF103A5C);
-const _mint = Color(0xFF14E3A4);
-const _darkMint = Color(0xFF0A5C52);
-const _cyan = Color(0xFF00FFD0);
-const _slate100 = Color(0xFFF1F5F9);
-const _slate400 = Color(0xFF94A3B8);
-const _slate500 = Color(0xFF475569);
-const _slate600 = Color(0xFF64748B);
+const _navy950 = AppColors.navy950;
+const _navy900 = AppColors.navy900;
+const _border = AppColors.border;
+const _mint = AppColors.mint;
+const _darkMint = AppColors.darkMint;
+const _cyan = AppColors.cyan;
+const _slate100 = AppColors.slate100;
+const _slate400 = AppColors.slate400;
+const _slate500 = AppColors.slate500;
+const _slate600 = AppColors.slate600;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constantes de layout
@@ -71,8 +73,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Widget build(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
     final isMobile = width < _mobileBreakpoint;
-    final roleAsync = ref.watch(userRoleProvider);
-    final role = roleAsync.valueOrNull ?? 'MEMBER';
+    final role = ref.watch(userRoleProvider);
 
     return Scaffold(
       backgroundColor: _navy950,
@@ -162,8 +163,7 @@ class _TopBar extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final usernameAsync = ref.watch(usernameProvider);
-    final username = usernameAsync.valueOrNull ?? 'U';
+    final username = ref.watch(usernameProvider);
     final initials = _getInitials(username);
 
     return Container(
@@ -277,8 +277,7 @@ class _Sidebar extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final usernameAsync = ref.watch(usernameProvider);
-    final username = usernameAsync.valueOrNull ?? 'Usuario';
+    final username = ref.watch(usernameProvider);
 
     return Container(
       width: isDrawer ? null : _sidebarWidth,
@@ -383,8 +382,7 @@ class _Sidebar extends ConsumerWidget {
               label: const Text('Cerrar sesión',
                   style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
               onPressed: () async {
-                await SecureVault.clearAuthData();
-                if (context.mounted) context.go('/login');
+                await ref.read(authProvider.notifier).logout();
               },
             ),
           ),
@@ -682,14 +680,58 @@ class _NodoActivoBanner extends StatelessWidget {
 // _NodoCard — Tarjeta individual de nodo
 // ═════════════════════════════════════════════════════════════════════════════
 
-class _NodoCard extends StatelessWidget {
+class _NodoCard extends ConsumerWidget {
   final Nodo nodo;
   const _NodoCard({required this.nodo});
 
+  void _confirmDelete(BuildContext context, WidgetRef ref) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _navy900,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: _border),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Color(0xFFEF4444)),
+            SizedBox(width: 10),
+            Text('¿Eliminar nodo?', style: TextStyle(color: _slate100, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Text(
+          '¿Estás seguro de que deseas eliminar el nodo "${nodo.nombre}"? Esta acción no se puede deshacer y desconectará a todos los miembros.',
+          style: const TextStyle(color: _slate400, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar', style: TextStyle(color: _slate400)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await ref.read(nodosProvider.notifier).deleteNodo(nodo.id);
+            },
+            child: const Text('Eliminar', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final statusColor = nodo.isActive ? _mint : _slate500;
     final statusLabel = nodo.isActive ? 'Activo' : 'Inactivo';
+    final globalRole = ref.watch(userRoleProvider);
+    final canDelete = nodo.rol == 'OWNER' || globalRole == 'ADMIN';
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -800,17 +842,31 @@ class _NodoCard extends StatelessWidget {
 
           const Spacer(),
 
-          // Fila inferior: miembros
+          // Fila inferior: miembros y botón eliminar
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Icon(Icons.people_outline_rounded,
-                  size: 15, color: _slate500),
-              const SizedBox(width: 6),
-              Text(
-                '${nodo.miembrosCount} miembros',
-                style:
-                    const TextStyle(color: _slate500, fontSize: 12),
+              Row(
+                children: [
+                  const Icon(Icons.people_outline_rounded,
+                      size: 15, color: _slate500),
+                  const SizedBox(width: 6),
+                  Text(
+                    '${nodo.miembrosCount} miembros',
+                    style:
+                        const TextStyle(color: _slate500, fontSize: 12),
+                  ),
+                ],
               ),
+              if (canDelete)
+                IconButton(
+                  icon: const Icon(Icons.delete_outline_rounded,
+                      size: 16, color: Color(0xFFEF4444)),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  tooltip: 'Eliminar nodo',
+                  onPressed: () => _confirmDelete(context, ref),
+                ),
             ],
           ),
         ],

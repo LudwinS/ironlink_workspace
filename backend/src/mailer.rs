@@ -4,9 +4,28 @@ use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 
 use crate::config::AppConfig;
 
-/// Envía un código de verificación OTP por correo electrónico
+pub type SmtpMailer = AsyncSmtpTransport<Tokio1Executor>;
+
+/// Inicializa el transporte SMTP reutilizable a partir de la configuración
+pub fn create_mailer(config: &AppConfig) -> Result<SmtpMailer, String> {
+    let creds = Credentials::new(
+        config.smtp_username.clone(),
+        config.smtp_password.clone(),
+    );
+
+    // Conectar a Gmail SMTP con STARTTLS en puerto 587
+    let transport = AsyncSmtpTransport::<Tokio1Executor>::starttls_relay("smtp.gmail.com")
+        .map_err(|e| format!("Error al configurar transporte SMTP: {}", e))?
+        .credentials(creds)
+        .port(587)
+        .build();
+    Ok(transport)
+}
+
+/// Envía un código de verificación OTP por correo electrónico usando el transporte compartido
 pub async fn send_verification_code(
-    config: &AppConfig,
+    mailer: &SmtpMailer,
+    from_email: &str,
     to: &str,
     code: &str,
 ) -> Result<(), String> {
@@ -31,12 +50,13 @@ pub async fn send_verification_code(
         "#
     );
 
-    send_email(config, to, "IronLink — Código de verificación", &html_body).await
+    send_email(mailer, from_email, to, "IronLink — Código de verificación", &html_body).await
 }
 
-/// Envía un enlace de verificación por correo electrónico
+/// Envía un enlace de verificación por correo electrónico usando el transporte compartido
 pub async fn send_verification_link(
-    config: &AppConfig,
+    mailer: &SmtpMailer,
+    from_email: &str,
     to: &str,
     link: &str,
 ) -> Result<(), String> {
@@ -63,20 +83,20 @@ pub async fn send_verification_link(
         "#
     );
 
-    send_email(config, to, "IronLink — Verifica tu cuenta", &html_body).await
+    send_email(mailer, from_email, to, "IronLink — Verifica tu cuenta", &html_body).await
 }
 
-/// Función interna para enviar correos electrónicos vía Gmail SMTP
+/// Función interna para enviar correos electrónicos vía Gmail SMTP usando el transporte existente
 async fn send_email(
-    config: &AppConfig,
+    mailer: &SmtpMailer,
+    from_email: &str,
     to: &str,
     subject: &str,
     html_body: &str,
 ) -> Result<(), String> {
     let email = Message::builder()
         .from(
-            config
-                .smtp_from
+            from_email
                 .parse()
                 .map_err(|e| format!("Error al parsear remitente SMTP: {}", e))?,
         )
@@ -87,18 +107,6 @@ async fn send_email(
         .header(ContentType::TEXT_HTML)
         .body(html_body.to_string())
         .map_err(|e| format!("Error al construir el correo: {}", e))?;
-
-    let creds = Credentials::new(
-        config.smtp_username.clone(),
-        config.smtp_password.clone(),
-    );
-
-    // Conectar a Gmail SMTP con STARTTLS en puerto 587
-    let mailer = AsyncSmtpTransport::<Tokio1Executor>::starttls_relay("smtp.gmail.com")
-        .map_err(|e| format!("Error al configurar transporte SMTP: {}", e))?
-        .credentials(creds)
-        .port(587)
-        .build();
 
     mailer
         .send(email)

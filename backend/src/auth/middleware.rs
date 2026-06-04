@@ -27,8 +27,7 @@ pub async fn jwt_auth(
     // Obtener la configuración del estado de la app
     let config = request
         .extensions()
-        .get::<AppConfig>()
-        .cloned();
+        .get::<std::sync::Arc<AppConfig>>();
 
     let config = match config {
         Some(c) => c,
@@ -49,8 +48,6 @@ pub async fn jwt_auth(
         .headers()
         .get("Authorization")
         .and_then(|v| v.to_str().ok());
-
-    println!("JWT Auth - Ruta: {} - Authorization Header: {:?}", request.uri().path(), auth_header);
 
     let token = match auth_header {
         Some(h) if h.starts_with("Bearer ") => &h[7..],

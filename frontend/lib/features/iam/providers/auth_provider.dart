@@ -35,16 +35,19 @@ class AuthState {
     String? successMessage,
     Map<String, String>? fieldErrors,
     Map<String, dynamic>? verifiedUserData,
+    bool clearErrors = false,
+    bool clearSuccess = false,
+    bool clearVerifiedUser = false,
   }) {
     return AuthState(
       status: status ?? this.status,
       username: username ?? this.username,
       email: email ?? this.email,
       role: role ?? this.role,
-      errorMessage: errorMessage ?? this.errorMessage,
-      successMessage: successMessage ?? this.successMessage,
-      fieldErrors: fieldErrors ?? this.fieldErrors,
-      verifiedUserData: verifiedUserData ?? this.verifiedUserData,
+      errorMessage: clearErrors ? null : (errorMessage ?? this.errorMessage),
+      successMessage: clearSuccess ? null : (successMessage ?? this.successMessage),
+      fieldErrors: clearErrors ? null : (fieldErrors ?? this.fieldErrors),
+      verifiedUserData: clearVerifiedUser ? null : (verifiedUserData ?? this.verifiedUserData),
     );
   }
 }
@@ -57,26 +60,35 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<void> checkPersistedSession() async {
+    print("DEBUG: AuthNotifier - checkPersistedSession() iniciado");
     state = state.copyWith(status: AuthStatus.loading);
-    
-    // Si no se marcó "Recordarme", limpiar los datos al iniciar la app
-    final rememberMe = await SecureVault.getRememberMe();
-    if (!rememberMe) {
-      await SecureVault.clearAuthData();
-    }
+    try {
+      final rememberMe = await SecureVault.getRememberMe();
+      print("DEBUG: AuthNotifier - rememberMe leído de SecureVault: $rememberMe");
+      if (!rememberMe) {
+        print("DEBUG: AuthNotifier - rememberMe es falso, limpiando session data...");
+        await SecureVault.clearAuthData();
+      }
 
-    final hasSession = await SecureVault.hasSession();
-    if (hasSession) {
-      final username = await SecureVault.getUsername();
-      final email = await SecureVault.getEmail();
-      final role = await SecureVault.getRole();
-      state = AuthState(
-        status: AuthStatus.authenticated,
-        username: username,
-        email: email,
-        role: role,
-      );
-    } else {
+      final hasSession = await SecureVault.hasSession();
+      print("DEBUG: AuthNotifier - hasSession check: $hasSession");
+      if (hasSession) {
+        final username = await SecureVault.getUsername();
+        final email = await SecureVault.getEmail();
+        final role = await SecureVault.getRole();
+        print("DEBUG: AuthNotifier - Sesión persistida encontrada. Usuario: $username, Rol: $role");
+        state = AuthState(
+          status: AuthStatus.authenticated,
+          username: username,
+          email: email,
+          role: role,
+        );
+      } else {
+        print("DEBUG: AuthNotifier - No hay sesión persistida activa");
+        state = AuthState(status: AuthStatus.unauthenticated);
+      }
+    } catch (e) {
+      print("DEBUG: AuthNotifier - ERROR en checkPersistedSession: $e");
       state = AuthState(status: AuthStatus.unauthenticated);
     }
   }
@@ -84,8 +96,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   /// Limpia los errores de campo para permitir reintento limpio
   void clearFieldErrors() {
     state = state.copyWith(
-      fieldErrors: null,
-      errorMessage: null,
+      clearErrors: true,
     );
   }
 
@@ -98,9 +109,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }) async {
     state = state.copyWith(
       status: AuthStatus.loading,
-      errorMessage: null,
-      successMessage: null,
-      fieldErrors: null,
+      clearErrors: true,
+      clearSuccess: true,
     );
     try {
       final message = await _repository.register(
@@ -133,9 +143,16 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<bool> login(String email, String password, {bool rememberMe = false}) async {
-    state = state.copyWith(status: AuthStatus.loading, errorMessage: null, successMessage: null, fieldErrors: null);
+    print("DEBUG: AuthNotifier - login() iniciado. Email: $email, rememberMe: $rememberMe");
+    state = state.copyWith(
+      status: AuthStatus.loading,
+      clearErrors: true,
+      clearSuccess: true,
+    );
     try {
+      print("DEBUG: AuthNotifier - Llamando a _repository.login...");
       final userData = await _repository.login(email: email, password: password, rememberMe: rememberMe);
+      print("DEBUG: AuthNotifier - _repository.login exitoso. Datos retornados: $userData");
 
       state = AuthState(
         status: AuthStatus.authenticated,
@@ -145,6 +162,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       );
       return true;
     } catch (e) {
+      print("DEBUG: AuthNotifier - ERROR en login(): $e");
       state = state.copyWith(
         status: AuthStatus.unauthenticated,
         errorMessage: e.toString().replaceAll('Exception: ', ''),
@@ -157,8 +175,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<bool> requestVerification(String email, String method) async {
     state = state.copyWith(
       status: AuthStatus.loading,
-      errorMessage: null,
-      successMessage: null,
+      clearErrors: true,
+      clearSuccess: true,
     );
     try {
       final message = await _repository.requestVerification(
@@ -185,8 +203,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<bool> verifyEmail(String email, String code) async {
     state = state.copyWith(
       status: AuthStatus.loading,
-      errorMessage: null,
-      successMessage: null,
+      clearErrors: true,
+      clearSuccess: true,
     );
     try {
       final userData = await _repository.verifyEmail(email: email, code: code);
@@ -212,8 +230,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<bool> verifyLink(String token) async {
     state = state.copyWith(
       status: AuthStatus.loading,
-      errorMessage: null,
-      successMessage: null,
+      clearErrors: true,
+      clearSuccess: true,
     );
     try {
       final userData = await _repository.verifyLink(token);
@@ -235,7 +253,11 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<void> resendVerification(String email) async {
-    state = state.copyWith(status: AuthStatus.loading, errorMessage: null, successMessage: null);
+    state = state.copyWith(
+      status: AuthStatus.loading,
+      clearErrors: true,
+      clearSuccess: true,
+    );
     try {
       final message = await _repository.resendVerificationEmail(email: email);
       state = state.copyWith(

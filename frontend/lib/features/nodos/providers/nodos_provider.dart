@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/nodos_repository.dart';
 import '../../../core/security/secure_vault.dart';
+import '../../iam/providers/auth_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Estado del módulo Nodos
@@ -116,6 +117,32 @@ class NodosNotifier extends StateNotifier<NodosState> {
     }
   }
 
+  /// Elimina un nodo por su ID.
+  Future<bool> deleteNodo(String id) async {
+    state = state.copyWith(status: NodosStatus.loading);
+    try {
+      // Buscar el nodo en el estado local para obtener su nombre
+      final nodo = state.nodos.firstWhere((n) => n.id == id);
+      final nombre = nodo.nombre;
+
+      await _repository.deleteNodo(id);
+      
+      final updatedNodos = state.nodos.where((n) => n.id != id).toList();
+      state = state.copyWith(
+        status: NodosStatus.loaded,
+        nodos: updatedNodos,
+        successMessage: 'Nodo "$nombre" eliminado exitosamente',
+      );
+      return true;
+    } catch (e) {
+      state = state.copyWith(
+        status: NodosStatus.loaded,
+        errorMessage: e.toString().replaceAll('Exception: ', ''),
+      );
+      return false;
+    }
+  }
+
   /// Limpia los mensajes temporales.
   void clearMessages() {
     state = state.copyWith(errorMessage: null, successMessage: null);
@@ -127,25 +154,28 @@ class NodosNotifier extends StateNotifier<NodosState> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 final nodosRepositoryProvider =
-    Provider<NodosRepository>((ref) => NodosRepository());
+    Provider.autoDispose<NodosRepository>((ref) => NodosRepository());
 
 final nodosProvider =
-    StateNotifierProvider<NodosNotifier, NodosState>((ref) {
+    StateNotifierProvider.autoDispose<NodosNotifier, NodosState>((ref) {
   final repo = ref.watch(nodosRepositoryProvider);
   return NodosNotifier(repo);
 });
 
-/// Provider para el rol del usuario (leído de SecureVault).
-final userRoleProvider = FutureProvider<String>((ref) async {
-  return await SecureVault.getRole() ?? 'MEMBER';
+/// Provider para el rol del usuario (leído de authProvider).
+final userRoleProvider = Provider<String>((ref) {
+  final authState = ref.watch(authProvider);
+  return authState.role ?? 'MEMBER';
 });
 
-/// Provider para el nombre de usuario.
-final usernameProvider = FutureProvider<String>((ref) async {
-  return await SecureVault.getUsername() ?? 'Usuario';
+/// Provider para el nombre de usuario (leído de authProvider).
+final usernameProvider = Provider<String>((ref) {
+  final authState = ref.watch(authProvider);
+  return authState.username ?? 'Usuario';
 });
 
-/// Provider para el email del usuario.
-final userEmailProvider = FutureProvider<String>((ref) async {
-  return await SecureVault.getEmail() ?? '';
+/// Provider para el email del usuario (leído de authProvider).
+final userEmailProvider = Provider<String>((ref) {
+  final authState = ref.watch(authProvider);
+  return authState.email ?? '';
 });

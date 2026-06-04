@@ -16,7 +16,7 @@ Este documento resume el progreso y estado actual de las Historias de Usuario pl
 
 ---
 
-## 🔑 Arquitectura de Tokens de Acceso y Sesión (JWT)
+## Arquitectura de Tokens de Acceso y Sesión (JWT)
 
 Para cumplir con las políticas de seguridad y comunicación de extremo a extremo, se ha implementado un esquema de **Doble Token (Access + Refresh Token)**:
 

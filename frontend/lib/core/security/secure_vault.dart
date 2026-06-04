@@ -13,6 +13,14 @@ class SecureVault {
   static const String _roleKey = 'role';
   static const String _rememberMeKey = 'remember_me';
 
+  // In-memory cache to prevent DPAPI registry write latency on immediate reads
+  static String? _cachedAccessToken;
+  static String? _cachedRefreshToken;
+  static String? _cachedUsername;
+  static String? _cachedEmail;
+  static String? _cachedRole;
+  static bool? _cachedRememberMe;
+
   static Future<void> saveAuthData({
     required String accessToken,
     required String refreshToken,
@@ -21,32 +29,82 @@ class SecureVault {
     required String role,
     bool rememberMe = false,
   }) async {
-    await _storage.write(key: _accessTokenKey, value: accessToken);
-    await _storage.write(key: _refreshTokenKey, value: refreshToken);
-    await _storage.write(key: _usernameKey, value: username);
-    await _storage.write(key: _emailKey, value: email);
-    await _storage.write(key: _roleKey, value: role);
-    await _storage.write(key: _rememberMeKey, value: rememberMe ? 'true' : 'false');
+    _cachedAccessToken = accessToken;
+    _cachedRefreshToken = refreshToken;
+    _cachedUsername = username;
+    _cachedEmail = email;
+    _cachedRole = role;
+    _cachedRememberMe = rememberMe;
+
+    await Future.wait([
+      _storage.write(key: _accessTokenKey, value: accessToken),
+      _storage.write(key: _refreshTokenKey, value: refreshToken),
+      _storage.write(key: _usernameKey, value: username),
+      _storage.write(key: _emailKey, value: email),
+      _storage.write(key: _roleKey, value: role),
+      _storage.write(key: _rememberMeKey, value: rememberMe ? 'true' : 'false'),
+    ]);
   }
 
-  static Future<String?> getAccessToken() async => await _storage.read(key: _accessTokenKey);
-  static Future<String?> getRefreshToken() async => await _storage.read(key: _refreshTokenKey);
-  static Future<String?> getUsername() async => await _storage.read(key: _usernameKey);
-  static Future<String?> getEmail() async => await _storage.read(key: _emailKey);
-  static Future<String?> getRole() async => await _storage.read(key: _roleKey);
+  static Future<String?> getAccessToken() async {
+    if (_cachedAccessToken != null) return _cachedAccessToken;
+    final token = await _storage.read(key: _accessTokenKey);
+    _cachedAccessToken = token;
+    return token;
+  }
+
+  static Future<String?> getRefreshToken() async {
+    if (_cachedRefreshToken != null) return _cachedRefreshToken;
+    final token = await _storage.read(key: _refreshTokenKey);
+    _cachedRefreshToken = token;
+    return token;
+  }
+
+  static Future<String?> getUsername() async {
+    if (_cachedUsername != null) return _cachedUsername;
+    final val = await _storage.read(key: _usernameKey);
+    _cachedUsername = val;
+    return val;
+  }
+
+  static Future<String?> getEmail() async {
+    if (_cachedEmail != null) return _cachedEmail;
+    final val = await _storage.read(key: _emailKey);
+    _cachedEmail = val;
+    return val;
+  }
+
+  static Future<String?> getRole() async {
+    if (_cachedRole != null) return _cachedRole;
+    final val = await _storage.read(key: _roleKey);
+    _cachedRole = val;
+    return val;
+  }
 
   static Future<bool> getRememberMe() async {
+    if (_cachedRememberMe != null) return _cachedRememberMe!;
     final val = await _storage.read(key: _rememberMeKey);
-    return val == 'true';
+    final res = val == 'true';
+    _cachedRememberMe = res;
+    return res;
   }
 
   static Future<void> clearAuthData() async {
-    await _storage.delete(key: _accessTokenKey);
-    await _storage.delete(key: _refreshTokenKey);
-    await _storage.delete(key: _usernameKey);
-    await _storage.delete(key: _emailKey);
-    await _storage.delete(key: _roleKey);
-    await _storage.delete(key: _rememberMeKey);
+    _cachedAccessToken = null;
+    _cachedRefreshToken = null;
+    _cachedUsername = null;
+    _cachedEmail = null;
+    _cachedRole = null;
+    _cachedRememberMe = null;
+
+    await Future.wait([
+      _storage.delete(key: _accessTokenKey),
+      _storage.delete(key: _refreshTokenKey),
+      _storage.delete(key: _usernameKey),
+      _storage.delete(key: _emailKey),
+      _storage.delete(key: _roleKey),
+      _storage.delete(key: _rememberMeKey),
+    ]);
   }
 
   static Future<bool> hasSession() async {
