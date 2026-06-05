@@ -1,10 +1,9 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
-import '../../../core/security/secure_vault.dart';
 import '../../../core/theme/app_colors.dart';
 import '../providers/nodos_provider.dart';
 import '../data/nodos_repository.dart';
@@ -65,8 +64,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    // Carga inicial de nodos al entrar al dashboard
-    Future.microtask(() => ref.read(nodosProvider.notifier).loadNodos());
+    // Carga inicial de nodos al entrar al dashboard y arranque del polling
+    Future.microtask(() {
+      ref.read(nodosProvider.notifier).loadNodos();
+      ref.read(nodosProvider.notifier).startPolling();
+    });
   }
 
   @override
@@ -733,143 +735,679 @@ class _NodoCard extends ConsumerWidget {
     final globalRole = ref.watch(userRoleProvider);
     final canDelete = nodo.rol == 'OWNER' || globalRole == 'ADMIN';
 
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: _navy900,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _border, width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.2),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Fila superior: indicador de estado + badge
-          Row(
-            children: [
-              Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: statusColor,
-                  boxShadow: nodo.isActive
-                      ? [
-                          BoxShadow(
-                            color: _mint.withValues(alpha: 0.5),
-                            blurRadius: 6,
-                          )
-                        ]
-                      : null,
-                ),
-              ),
-              const Spacer(),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: statusColor.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                      color: statusColor.withValues(alpha: 0.4), width: 1),
-                ),
-                child: Text(
-                  statusLabel,
-                  style: TextStyle(
-                    color: statusColor,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: () {
+          showDialog(
+            context: context,
+            builder: (_) => _NodoDetailsDialog(nodo: nodo),
+          );
+        },
+        child: Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: _navy900,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _border, width: 1),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.2),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-
-          // Nombre del nodo
-          Text(
-            nodo.nombre,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: _slate100,
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 4),
-
-          // Token (abreviado) + Creador
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Text(
-                  [
-                    'IRL-${nodo.tokenAcceso.length > 8 ? nodo.tokenAcceso.substring(0, 8).toUpperCase() : nodo.tokenAcceso.toUpperCase()}',
-                    if (nodo.creadorNombre != null) nodo.creadorNombre!,
-                  ].join(' · '),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: _slate600, fontSize: 12),
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.copy_rounded, size: 14, color: _slate500),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-                tooltip: 'Copiar token de acceso',
-                onPressed: () {
-                  Clipboard.setData(ClipboardData(text: nodo.tokenAcceso));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: const Text('Token de acceso copiado al portapapeles', style: TextStyle(color: Colors.white)),
-                      backgroundColor: _mint.withValues(alpha: 0.85),
-                      behavior: SnackBarBehavior.floating,
-                      duration: const Duration(seconds: 2),
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
-
-          const Spacer(),
-
-          // Fila inferior: miembros y botón eliminar
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
+              // Fila superior: indicador de estado + badge
               Row(
                 children: [
-                  const Icon(Icons.people_outline_rounded,
-                      size: 15, color: _slate500),
-                  const SizedBox(width: 6),
-                  Text(
-                    '${nodo.miembrosCount} miembros',
-                    style:
-                        const TextStyle(color: _slate500, fontSize: 12),
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: statusColor,
+                      boxShadow: nodo.isActive
+                          ? [
+                              BoxShadow(
+                                color: _mint.withValues(alpha: 0.5),
+                                blurRadius: 6,
+                              )
+                            ]
+                          : null,
+                    ),
+                  ),
+                  const Spacer(),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                          color: statusColor.withValues(alpha: 0.4), width: 1),
+                    ),
+                    child: Text(
+                      statusLabel,
+                      style: TextStyle(
+                        color: statusColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
                 ],
               ),
-              if (canDelete)
-                IconButton(
-                  icon: const Icon(Icons.delete_outline_rounded,
-                      size: 16, color: Color(0xFFEF4444)),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  tooltip: 'Eliminar nodo',
-                  onPressed: () => _confirmDelete(context, ref),
+              const SizedBox(height: 12),
+
+              // Nombre del nodo
+              Text(
+                nodo.nombre,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: _slate100,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
                 ),
+              ),
+              const SizedBox(height: 4),
+
+              // Token (abreviado) + Creador
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      [
+                        'IRL-${nodo.tokenAcceso.length > 8 ? nodo.tokenAcceso.substring(0, 8).toUpperCase() : nodo.tokenAcceso.toUpperCase()}',
+                        if (nodo.creadorNombre != null) nodo.creadorNombre!,
+                      ].join(' · '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: _slate600, fontSize: 12),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.copy_rounded, size: 14, color: _slate500),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    tooltip: 'Copiar token de acceso',
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: nodo.tokenAcceso));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: const Text('Token de acceso copiado al portapapeles', style: TextStyle(color: Colors.white)),
+                          backgroundColor: _mint.withValues(alpha: 0.85),
+                          behavior: SnackBarBehavior.floating,
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+
+              const Spacer(),
+
+              // Fila inferior: miembros y botón eliminar
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.people_outline_rounded,
+                          size: 15, color: _slate500),
+                      const SizedBox(width: 6),
+                      Text(
+                        '${nodo.miembrosCount} miembros',
+                        style:
+                            const TextStyle(color: _slate500, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                  if (canDelete)
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline_rounded,
+                          size: 16, color: Color(0xFFEF4444)),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      tooltip: 'Eliminar nodo',
+                      onPressed: () => _confirmDelete(context, ref),
+                    ),
+                ],
+              ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// _NodoDetailsDialog — Diálogo con detalles e integrantes del nodo
+// ═════════════════════════════════════════════════════════════════════════════
+
+class _NodoDetailsDialog extends ConsumerStatefulWidget {
+  final Nodo nodo;
+  const _NodoDetailsDialog({required this.nodo});
+
+  @override
+  ConsumerState<_NodoDetailsDialog> createState() => _NodoDetailsDialogState();
+}
+
+class _NodoDetailsDialogState extends ConsumerState<_NodoDetailsDialog> {
+  List<NodoMiembro>? _miembros;
+  bool _loading = true;
+  bool _updating = false;
+  String? _error;
+  Timer? _refreshTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchMiembros();
+    // Iniciar bucle de actualización para los miembros de este nodo abierto
+    _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _fetchMiembros(silent: true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _fetchMiembros({bool silent = false}) async {
+    if (!silent) {
+      if (mounted) {
+        setState(() {
+          _loading = true;
+          _error = null;
+        });
+      }
+    }
+    try {
+      final repo = ref.read(nodosRepositoryProvider);
+      final miembros = await repo.fetchMiembros(widget.nodo.id);
+      if (mounted) {
+        setState(() {
+          _miembros = miembros;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString().replaceAll('Exception: ', '');
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _changeRole(String targetUserId, String newRol) async {
+    setState(() {
+      _updating = true;
+    });
+    try {
+      final repo = ref.read(nodosRepositoryProvider);
+      await repo.updateMiembroRol(
+        nodoId: widget.nodo.id,
+        userId: targetUserId,
+        newRol: newRol,
+      );
+      // Recargar miembros
+      await _fetchMiembros(silent: true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Rol actualizado a $newRol exitosamente', style: const TextStyle(color: Colors.white)),
+            backgroundColor: _mint.withValues(alpha: 0.85),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.toString().replaceAll('Exception: ', ''), style: const TextStyle(color: Colors.white)),
+            backgroundColor: const Color(0xFFEF4444).withValues(alpha: 0.85),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _updating = false;
+        });
+      }
+    }
+  }
+
+  Widget _buildRoleBadge(String role) {
+    Color color;
+    Color bg;
+    switch (role.toUpperCase()) {
+      case 'OWNER':
+        color = const Color(0xFFFBBF24); // Amber
+        bg = const Color(0xFFFBBF24).withValues(alpha: 0.15);
+        break;
+      case 'ADMIN':
+        color = _cyan;
+        bg = _cyan.withValues(alpha: 0.15);
+        break;
+      default:
+        color = _slate400;
+        bg = _slate400.withValues(alpha: 0.15);
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.4), width: 1),
+      ),
+      child: Text(
+        role,
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
+  }
+
+  void _confirmDelete(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _navy900,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: _border),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Color(0xFFEF4444)),
+            SizedBox(width: 10),
+            Text('¿Eliminar nodo?', style: TextStyle(color: _slate100, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Text(
+          '¿Estás seguro de que deseas eliminar el nodo "${widget.nodo.nombre}"? Esta acción no se puede deshacer y desconectará a todos los miembros.',
+          style: const TextStyle(color: _slate400, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar', style: TextStyle(color: _slate400)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await ref.read(nodosProvider.notifier).deleteNodo(widget.nodo.id);
+            },
+            child: const Text('Eliminar', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildMembersList(String currentUserEmail, bool isCurrentUserOwner) {
+    if (_loading && _miembros == null) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(20.0),
+          child: CircularProgressIndicator(color: _mint),
+        ),
+      );
+    }
+
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Text(
+            _error!,
+            style: const TextStyle(color: Color(0xFFEF4444), fontSize: 13),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+
+    if (_miembros == null || _miembros!.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(20.0),
+          child: Text(
+            'No hay participantes en este nodo.',
+            style: TextStyle(color: _slate500, fontSize: 13),
+          ),
+        ),
+      );
+    }
+
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemCount: _miembros!.length,
+      separatorBuilder: (_, _) => const Divider(color: _border, height: 1),
+      itemBuilder: (context, index) {
+        final member = _miembros![index];
+        final isSelf = member.email == currentUserEmail;
+        final nameLabel = isSelf ? '${member.name} (Tú)' : member.name;
+
+        return ListTile(
+          dense: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+          leading: Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                colors: isSelf ? [_mint, _cyan] : [_slate500, _slate600],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            child: Center(
+              child: Text(
+                member.name.isNotEmpty ? member.name[0].toUpperCase() : 'U',
+                style: TextStyle(
+                  color: isSelf ? _navy950 : _slate100,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ),
+          title: Text(
+            nameLabel,
+            style: const TextStyle(
+              color: _slate100,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          subtitle: Text(
+            member.email,
+            style: const TextStyle(
+              color: _slate500,
+              fontSize: 11,
+            ),
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildRoleBadge(member.rol),
+              if (isCurrentUserOwner && member.rol.toUpperCase() != 'OWNER') ...[
+                const SizedBox(width: 8),
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert_rounded, color: _slate400, size: 18),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  color: _navy900,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    side: const BorderSide(color: _border),
+                  ),
+                  onSelected: (targetRol) => _changeRole(member.userId, targetRol),
+                  itemBuilder: (ctx) => [
+                    PopupMenuItem(
+                      value: 'ADMIN',
+                      child: Row(
+                        children: [
+                          const Icon(Icons.shield_outlined, color: _cyan, size: 16),
+                          const SizedBox(width: 8),
+                          Text(
+                            member.rol == 'ADMIN' ? '✓ Administrador' : 'Hacer Administrador',
+                            style: const TextStyle(color: _slate100, fontSize: 13),
+                          ),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'MEMBER',
+                      child: Row(
+                        children: [
+                          const Icon(Icons.person_outline_rounded, color: _slate400, size: 16),
+                          const SizedBox(width: 8),
+                          Text(
+                            member.rol == 'MEMBER' ? '✓ Miembro' : 'Hacer Miembro',
+                            style: const TextStyle(color: _slate100, fontSize: 13),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final currentUserEmail = ref.watch(userEmailProvider);
+    final globalRole = ref.watch(userRoleProvider);
+    // Para ver si el usuario actual es owner del nodo o admin global
+    final isCurrentUserOwner = widget.nodo.rol == 'OWNER' || globalRole == 'ADMIN';
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          child: Container(
+            width: 480,
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: _navy900.withValues(alpha: 0.95),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: _border, width: 1),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header: Nombre del nodo + botón cerrar
+                Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: _mint.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.hub_rounded, color: _mint, size: 22),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.nodo.nombre,
+                            style: const TextStyle(
+                              color: _slate100,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Token: IRL-${widget.nodo.tokenAcceso.length > 8 ? widget.nodo.tokenAcceso.substring(0, 8).toUpperCase() : widget.nodo.tokenAcceso.toUpperCase()}',
+                            style: const TextStyle(
+                              color: _slate500,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, color: _slate400),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+
+                // Descripción
+                if (widget.nodo.descripcion != null && widget.nodo.descripcion!.isNotEmpty) ...[
+                  Text(
+                    widget.nodo.descripcion!,
+                    style: const TextStyle(color: _slate400, fontSize: 13),
+                  ),
+                  const SizedBox(height: 20),
+                ],
+
+                // Fila de Token y Copiar
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: _navy950,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: _border),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          widget.nodo.tokenAcceso,
+                          style: const TextStyle(
+                            color: _mint,
+                            fontFamily: 'monospace',
+                            fontSize: 12,
+                            letterSpacing: 0.5,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.copy_rounded, color: _slate400, size: 16),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        tooltip: 'Copiar token de acceso completo',
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: widget.nodo.tokenAcceso));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: const Text('Token de acceso copiado', style: TextStyle(color: Colors.white)),
+                              backgroundColor: _mint.withValues(alpha: 0.85),
+                              behavior: SnackBarBehavior.floating,
+                              duration: const Duration(seconds: 2),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // Lista de Participantes Header
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'PARTICIPANTES (${_miembros?.length ?? widget.nodo.miembrosCount})',
+                      style: const TextStyle(
+                        color: _slate500,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                    if (_updating)
+                      const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: _mint),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+
+                // Lista de Participantes body
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 220),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: _navy950,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: _border),
+                    ),
+                    child: _buildMembersList(currentUserEmail, isCurrentUserOwner),
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // Botones del Diálogo
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      style: TextButton.styleFrom(
+                        foregroundColor: _slate400,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      ),
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Cerrar'),
+                    ),
+                    if (isCurrentUserOwner) ...[
+                      const SizedBox(width: 12),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFEF4444),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        icon: const Icon(Icons.delete_outline_rounded, size: 16),
+                        label: const Text('Eliminar nodo', style: TextStyle(fontWeight: FontWeight.w700)),
+                        onPressed: () {
+                          // Cerrar el detalles dialog y confirmar delete
+                          Navigator.pop(context);
+                          _confirmDelete(context);
+                        },
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

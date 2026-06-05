@@ -165,6 +165,42 @@ class NodosRepository {
     }
   }
 
+  /// Obtiene la lista de miembros de un nodo.
+  /// GET /nodos/:id/miembros
+  Future<List<NodoMiembro>> fetchMiembros(String nodoId) async {
+    try {
+      final response = await _client.get('/nodos/$nodoId/miembros');
+      final data = response.data;
+      if (data is Map<String, dynamic> && data['miembros'] is List) {
+        return (data['miembros'] as List)
+            .map((e) => NodoMiembro.fromJson(e as Map<String, dynamic>))
+            .toList();
+      }
+      return [];
+    } on DioException catch (e) {
+      final msg = _extractErrorMessage(e, 'Error al obtener los miembros');
+      throw Exception(msg);
+    }
+  }
+
+  /// Actualiza el rol de un miembro en el nodo.
+  /// PUT /nodos/:id/miembros/:user_id/rol
+  Future<void> updateMiembroRol({
+    required String nodoId,
+    required String userId,
+    required String newRol,
+  }) async {
+    try {
+      await _client.put(
+        '/nodos/$nodoId/miembros/$userId/rol',
+        data: {'rol': newRol},
+      );
+    } on DioException catch (e) {
+      final msg = _extractErrorMessage(e, 'Error al actualizar el rol');
+      throw Exception(msg);
+    }
+  }
+
   /// Extrae un mensaje legible de una respuesta de error Dio.
   String _extractErrorMessage(DioException e, String fallback) {
     final responseData = e.response?.data;
@@ -175,5 +211,28 @@ class NodosRepository {
       return responseData;
     }
     return fallback;
+  }
+}
+
+class NodoMiembro {
+  final String userId;
+  final String name;
+  final String email;
+  final String rol;
+
+  const NodoMiembro({
+    required this.userId,
+    required this.name,
+    required this.email,
+    required this.rol,
+  });
+
+  factory NodoMiembro.fromJson(Map<String, dynamic> json) {
+    return NodoMiembro(
+      userId: json['user_id'] as String? ?? json['id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      email: json['email'] as String? ?? '',
+      rol: json['rol'] as String? ?? 'MEMBER',
+    );
   }
 }

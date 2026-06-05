@@ -1,6 +1,6 @@
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/nodos_repository.dart';
-import '../../../core/security/secure_vault.dart';
 import '../../iam/providers/auth_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -51,21 +51,46 @@ class NodosState {
 
 class NodosNotifier extends StateNotifier<NodosState> {
   final NodosRepository _repository;
+  Timer? _pollingTimer;
 
   NodosNotifier(this._repository) : super(const NodosState());
 
   /// Carga los nodos del usuario.
-  Future<void> loadNodos() async {
-    state = state.copyWith(status: NodosStatus.loading);
+  Future<void> loadNodos({bool silent = false}) async {
+    if (!silent) {
+      state = state.copyWith(status: NodosStatus.loading);
+    }
     try {
       final nodos = await _repository.fetchNodos();
       state = state.copyWith(status: NodosStatus.loaded, nodos: nodos);
     } catch (e) {
-      state = state.copyWith(
-        status: NodosStatus.error,
-        errorMessage: e.toString().replaceAll('Exception: ', ''),
-      );
+      if (!silent) {
+        state = state.copyWith(
+          status: NodosStatus.error,
+          errorMessage: e.toString().replaceAll('Exception: ', ''),
+        );
+      }
     }
+  }
+
+  /// Inicia el bucle de actualización periódica.
+  void startPolling() {
+    _pollingTimer?.cancel();
+    _pollingTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+      loadNodos(silent: true);
+    });
+  }
+
+  /// Detiene el bucle de actualización.
+  void stopPolling() {
+    _pollingTimer?.cancel();
+    _pollingTimer = null;
+  }
+
+  @override
+  void dispose() {
+    stopPolling();
+    super.dispose();
   }
 
   /// Crea un nodo nuevo y lo agrega a la lista local.

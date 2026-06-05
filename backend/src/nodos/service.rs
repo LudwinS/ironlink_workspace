@@ -427,3 +427,244 @@ pub async fn delete_nodo(
     }
 }
 
+// ─── DTOs de miembros y roles ────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct NodoMiembroInfo {
+    pub user_id: Uuid,
+    pub name: String,
+    pub email: String,
+    pub rol: String,
+}
+
+#[derive(Serialize)]
+pub struct MiembrosResponse {
+    pub success: bool,
+    pub message: String,
+    pub miembros: Vec<NodoMiembroInfo>,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateRolDto {
+    pub rol: String,
+}
+
+#[derive(Serialize)]
+pub struct UpdateRolResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+// ─── GET /nodos/{id}/miembros ─────────────────────────────────────────────
+
+pub async fn list_miembros(
+    State(state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
+    axum::extract::Path(id): axum::extract::Path<Uuid>,
+) -> (StatusCode, Json<MiembrosResponse>) {
+    // 1. Verificar si el usuario actual es miembro del nodo
+    let member_check = sqlx::query_as::<_, (String,)>(
+        "SELECT rol FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2"
+    )
+    .bind(id)
+    .bind(auth_user.user_id)
+    .fetch_optional(&state.pool)
+    .await;
+
+    if let Err(e) = member_check {
+        eprintln!("Error al verificar membresía: {}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(MiembrosResponse {
+                success: false,
+                message: "Error interno al verificar permisos.".to_string(),
+                miembros: vec![],
+            }),
+        );
+    }
+
+    let is_member = member_check.unwrap();
+    if is_member.is_none() && auth_user.role != "ADMIN" {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(MiembrosResponse {
+                success: false,
+                message: "No tienes permiso para ver los miembros de este nodo.".to_string(),
+                miembros: vec![],
+            }),
+        );
+    }
+
+    // 2. Obtener lista de miembros
+    let rows = sqlx::query_as::<_, (Uuid, String, String, String)>(
+        r#"
+        SELECT u.id, u.name, u.email, nm.rol
+        FROM nodo_miembros nm
+        INNER JOIN users u ON nm.user_id = u.id
+        WHERE nm.nodo_id = $1
+        ORDER BY 
+            CASE nm.rol
+                WHEN 'OWNER' THEN 1
+                WHEN 'ADMIN' THEN 2
+                ELSE 3
+            END,
+            u.name ASC
+        "#
+    )
+    .bind(id)
+    .fetch_all(&state.pool)
+    .await;
+
+    match rows {
+        Ok(miembros) => {
+            let list = miembros
+                .into_iter()
+                .map(|(user_id, name, email, rol)| NodoMiembroInfo {
+                    user_id,
+                    name,
+                    email,
+                    rol,
+                })
+                .collect();
+
+            (
+                StatusCode::OK,
+                Json(MiembrosResponse {
+                    success: true,
+                    message: "Miembros cargados exitosamente.".to_string(),
+                    miembros: list,
+                }),
+            )
+        }
+        Err(e) => {
+            eprintln!("Error al obtener miembros del nodo: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(MiembrosResponse {
+                    success: false,
+                    message: "Error interno al obtener la lista de miembros.".to_string(),
+                    miembros: vec![],
+                }),
+            )
+        }
+    }
+}
+
+// ─── PUT /nodos/{id}/miembros/{target_user_id}/rol ─────────────────────────
+
+pub async fn update_miembro_rol(
+    State(state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
+    axum::extract::Path((nodo_id, target_user_id)): axum::extract::Path<(Uuid, Uuid)>,
+    Json(payload): Json<UpdateRolDto>,
+) -> (StatusCode, Json<UpdateRolResponse>) {
+    // 1. Validar el rol solicitado (solo ADMIN o MEMBER se pueden asignar)
+    let nuevo_rol = payload.rol.trim().to_uppercase();
+    if nuevo_rol != "ADMIN" && nuevo_rol != "MEMBER" {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(UpdateRolResponse {
+                success: false,
+                message: "Rol no permitido. Solo se puede asignar ADMIN o MEMBER.".to_string(),
+            }),
+        );
+    }
+
+    // 2. Verificar que el usuario actual sea el OWNER del nodo o un administrador global
+    let current_user_check = sqlx::query_as::<_, (String,)>(
+        "SELECT rol FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2"
+    )
+    .bind(nodo_id)
+    .bind(auth_user.user_id)
+    .fetch_optional(&state.pool)
+    .await;
+
+    let can_update = match current_user_check {
+        Ok(Some((rol,))) => rol == "OWNER" || auth_user.role == "ADMIN",
+        _ => auth_user.role == "ADMIN",
+    };
+
+    if !can_update {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(UpdateRolResponse {
+                success: false,
+                message: "Solo el creador (OWNER) del nodo puede designar roles.".to_string(),
+            }),
+        );
+    }
+
+    // 3. Verificar que el usuario objetivo pertenezca al nodo y no sea el OWNER
+    let target_user_check = sqlx::query_as::<_, (String,)>(
+        "SELECT rol FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2"
+    )
+    .bind(nodo_id)
+    .bind(target_user_id)
+    .fetch_optional(&state.pool)
+    .await;
+
+    match target_user_check {
+        Ok(Some((rol,))) => {
+            if rol == "OWNER" {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(UpdateRolResponse {
+                        success: false,
+                        message: "No se puede modificar el rol del creador del nodo.".to_string(),
+                    }),
+                );
+            }
+        }
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(UpdateRolResponse {
+                    success: false,
+                    message: "El usuario objetivo no es miembro de este nodo.".to_string(),
+                }),
+            );
+        }
+        Err(e) => {
+            eprintln!("Error al verificar usuario objetivo: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(UpdateRolResponse {
+                    success: false,
+                    message: "Error interno al verificar el miembro.".to_string(),
+                }),
+            );
+        }
+    }
+
+    // 4. Actualizar el rol
+    let update_result = sqlx::query(
+        "UPDATE nodo_miembros SET rol = $1 WHERE nodo_id = $2 AND user_id = $3"
+    )
+    .bind(&nuevo_rol)
+    .bind(nodo_id)
+    .bind(target_user_id)
+    .execute(&state.pool)
+    .await;
+
+    match update_result {
+        Ok(_) => (
+            StatusCode::OK,
+            Json(UpdateRolResponse {
+                success: true,
+                message: format!("Rol actualizado a {} exitosamente.", nuevo_rol),
+            }),
+        ),
+        Err(e) => {
+            eprintln!("Error al actualizar el rol del miembro: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(UpdateRolResponse {
+                    success: false,
+                    message: "Error interno al actualizar el rol.".to_string(),
+                }),
+            )
+        }
+    }
+}
+
+
