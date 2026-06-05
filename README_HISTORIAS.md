@@ -63,34 +63,4 @@ Para cumplir con las políticas de seguridad y comunicación de extremo a extrem
 *   **Creación**: Cualquier usuario puede crear un nodo desde la barra lateral o botón flotante. El creador se registra automáticamente como miembro con rol `'OWNER'`.
 *   **Invitación**: Generación de tokens únicos hexadecimales de 32 caracteres para compartir. Otros usuarios pueden unirse al nodo introduciendo este token en la interfaz de "Unirse a nodo".
 
----
-
-## 🐛 Historial de Errores Encontrados y Solucionados (Bugs)
-
-Durante el desarrollo del Sprint 1, se detectaron, documentaron y corrigieron los siguientes errores:
-
-### 1. Error de Bloqueo de Login al no marcar "Recuérdame"
-*   **Problema**: Cuando el usuario intentaba iniciar sesión con las credenciales correctas pero **sin** marcar la casilla de "Recordarme", el login fallaba y lo regresaba inmediatamente a la pantalla de `/login`.
-*   **Causa**: La función `SecureVault.hasSession()` comprobaba si la clave `remember_me` era `'true'` para validar la sesión. Al no marcar la casilla, `remember_me` se guardaba como `'false'`. El enrutador ([app_router.dart](file:///C:/Users/Ludwin/ironlink_workspace/frontend/lib/core/router/app_router.dart)) ejecutaba su redirección de seguridad, detectaba `hasSession() == false` y forzaba el retorno a `/login` a pesar de que el token JWT era válido y el inicio de sesión del backend había sido exitoso.
-*   **Solución**: Se separó la comprobación de sesión activa (que ahora solo verifica la existencia del token JWT en [secure_vault.dart](file:///C:/Users/Ludwin/ironlink_workspace/frontend/lib/core/security/secure_vault.dart)) de la comprobación de persistencia al arrancar la app. Si al arrancar la app `remember_me` es `'false'`, los tokens se limpian y se exige login; de lo contrario, se mantiene la navegación fluida.
-
-### 2. Error de Conteo de Participantes en Nodos
-*   **Problema**: Cuando un usuario creaba un nodo o cuando otro usuario se unía a él mediante el token de acceso de 32 caracteres, el contador de miembros en la interfaz no se actualizaba (mostraba siempre `0` o datos estáticos).
-*   **Causa**: El backend no estaba calculando la suma de registros en la tabla intermedia `nodo_miembros` durante las consultas SQL de listado, creación y unión de nodos.
-*   **Solución**: Se incorporó una subconsulta `miembros_count` en las consultas de base de datos del backend ([service.rs](file:///C:/Users/Ludwin/ironlink_workspace/backend/src/nodos/service.rs)) para que devuelva dinámicamente la cantidad real de participantes vinculados a cada nodo.
-
-### 3. Confusión de Token de Verificación Requerido
-*   **Problema**: Al intentar crear un nodo o unirse a uno, el sistema mostraba un error que indicaba "Token de autenticación requerido" o errores de validación de token.
-*   **Causa**: Había una colisión y confusión de conceptos entre el token de verificación de cuenta de correo (OTP de 6 dígitos / enlace de correo) y el token JWT de acceso del usuario para peticiones HTTP autenticadas.
-*   **Solución**: Se reestructuraron los endpoints del backend para que el middleware de autenticación (`jwt_auth`) solo aplique a rutas protegidas (`/nodos`), mientras que las rutas de verificación (`/verify-email`, `/verify-link`) se mantengan completamente públicas. Además, se pulió el interceptor HTTP de Dio en el frontend para asegurar el envío consistente de la cabecera `Authorization: Bearer <token>`.
-
-### 4. Restos de Nomenclatura Antigua ("Aulas" y "UGB")
-*   **Problema**: Varias pantallas del frontend y variables mostraban referencias a "aulas virtuales", "salas", "calendarios" e identificadores institucionales de la universidad UGB.
-*   **Causa**: Copias y plantillas remanentes del sistema universitario previo.
-*   **Solución**: Se realizó una limpieza de código integral en los archivos de la interfaz ([login_screen.dart](file:///C:/Users/Ludwin/ironlink_workspace/frontend/lib/features/iam/presentation/login_screen.dart), [register_screen.dart](file:///C:/Users/Ludwin/ironlink_workspace/frontend/lib/features/iam/presentation/register_screen.dart) y [dashboard_screen.dart](file:///C:/Users/Ludwin/ironlink_workspace/frontend/lib/features/nodos/presentation/dashboard_screen.dart)) renombrando todos los elementos a "Nodos" e "IronLink", eliminando por completo la sección de calendario institucional y desvinculando cualquier logotipo de la UGB.
-
-### 5. Fallo de Interceptor de Token JWT en Dio
-*   **Problema**: Aleatoriamente las peticiones del frontend fallaban con código 401 Unauthorized en el backend debido a que no se inyectaba el token de acceso, obligando al usuario a re-autenticarse constantemente.
-*   **Causa**: La lista de interceptores del cliente HTTP (Dio) duplicaba instancias o se saltaba la inyección del token si se realizaban múltiples peticiones asíncronas concurrentes.
-*   **Solución**: Se modificó la inicialización en `api_client.dart` usando un patrón Singleton estricto con un flag de inicialización que garantiza que el interceptor de autorización se configure una única vez y tenga prioridad absoluta sobre las cabeceras HTTP.
 
