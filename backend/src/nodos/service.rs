@@ -261,6 +261,27 @@ pub async fn join_nodo(
         }
     };
 
+    // 1.5. Verificar si el usuario está baneado de este nodo
+    let ban_check = sqlx::query_as::<_, (Uuid,)>(
+        "SELECT user_id FROM nodo_baneos WHERE nodo_id = $1 AND user_id = $2"
+    )
+    .bind(nodo_id)
+    .bind(auth_user.user_id)
+    .fetch_optional(&state.pool)
+    .await;
+
+    if let Ok(Some(_)) = ban_check {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(NodoResponse {
+                success: false,
+                message: "Has sido baneado de este nodo y no puedes volver a unirte.".to_string(),
+                nodo: None,
+                nodos: None,
+            }),
+        );
+    }
+
     // 2. Verificar si ya es miembro
     let existing = sqlx::query_as::<_, (String,)>(
         "SELECT rol FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2"
@@ -379,13 +400,13 @@ pub async fn delete_nodo(
         }
     };
 
-    // 2. Comprobar permisos (creador del nodo o administrador global)
-    if creador_id != auth_user.user_id && auth_user.role != "ADMIN" {
+    // 2. Comprobar permisos (SOLO el creador del nodo puede eliminarlo)
+    if creador_id != auth_user.user_id {
         return (
             StatusCode::FORBIDDEN,
             Json(NodoResponse {
                 success: false,
-                message: "No tienes permisos para eliminar este nodo.".to_string(),
+                message: "Solo el propietario (OWNER) de este nodo puede eliminarlo.".to_string(),
                 nodo: None,
                 nodos: None,
             }),
@@ -661,6 +682,786 @@ pub async fn update_miembro_rol(
                 Json(UpdateRolResponse {
                     success: false,
                     message: "Error interno al actualizar el rol.".to_string(),
+                }),
+            )
+        }
+    }
+}
+
+// ─── POST /nodos/{id}/leave ──────────────────────────────────────────────
+
+pub async fn leave_nodo(
+    State(state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
+    axum::extract::Path(id): axum::extract::Path<Uuid>,
+) -> (StatusCode, Json<NodoResponse>) {
+    // 1. Verificar si el usuario es miembro y obtener su rol
+    let member_check = sqlx::query_as::<_, (String,)>(
+        "SELECT rol FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2"
+    )
+    .bind(id)
+    .bind(auth_user.user_id)
+    .fetch_optional(&state.pool)
+    .await;
+
+    let rol = match member_check {
+        Ok(Some((r,))) => r,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(NodoResponse {
+                    success: false,
+                    message: "No eres miembro de este nodo.".to_string(),
+                    nodo: None,
+                    nodos: None,
+                }),
+            );
+        }
+        Err(e) => {
+            eprintln!("Error al verificar membresía para salir del nodo: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(NodoResponse {
+                    success: false,
+                    message: "Error interno al verificar membresía.".to_string(),
+                    nodo: None,
+                    nodos: None,
+                }),
+            );
+        }
+    };
+
+    // 2. Si es OWNER, no puede salir de esta forma (debe eliminar el nodo o transferir propiedad)
+    if rol == "OWNER" {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(NodoResponse {
+                success: false,
+                message: "El creador/propietario no puede salir del nodo. Debes eliminar el nodo.".to_string(),
+                nodo: None,
+                nodos: None,
+            }),
+        );
+    }
+
+    // 3. Eliminar de nodo_miembros
+    let delete_result = sqlx::query(
+        "DELETE FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2"
+    )
+    .bind(id)
+    .bind(auth_user.user_id)
+    .execute(&state.pool)
+    .await;
+
+    match delete_result {
+        Ok(_) => (
+            StatusCode::OK,
+            Json(NodoResponse {
+                success: true,
+                message: "Has salido del nodo exitosamente.".to_string(),
+                nodo: None,
+                nodos: None,
+            }),
+        ),
+        Err(e) => {
+            eprintln!("Error al salir del nodo: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(NodoResponse {
+                    success: false,
+                    message: "Error interno al salir del nodo.".to_string(),
+                    nodo: None,
+                    nodos: None,
+                }),
+            )
+        }
+    }
+}
+
+// ─── DELETE /nodos/{id}/miembros/{user_id} ────────────────────────────────
+
+pub async fn kick_miembro(
+    State(state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
+    axum::extract::Path((nodo_id, target_user_id)): axum::extract::Path<(Uuid, Uuid)>,
+) -> (StatusCode, Json<UpdateRolResponse>) {
+    // 1. No se puede expulsar a sí mismo
+    if auth_user.user_id == target_user_id {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(UpdateRolResponse {
+                success: false,
+                message: "No puedes expulsarte a ti mismo del nodo. Debes usar la opción de salir.".to_string(),
+            }),
+        );
+    }
+
+    // 2. Obtener rol del usuario actual en el nodo
+    let current_user_check = sqlx::query_as::<_, (String,)>(
+        "SELECT rol FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2"
+    )
+    .bind(nodo_id)
+    .bind(auth_user.user_id)
+    .fetch_optional(&state.pool)
+    .await;
+
+    let current_rol = match current_user_check {
+        Ok(Some((rol,))) => rol,
+        _ => {
+            if auth_user.role == "ADMIN" {
+                "GLOBAL_ADMIN".to_string()
+            } else {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(UpdateRolResponse {
+                        success: false,
+                        message: "No eres miembro de este nodo ni administrador global.".to_string(),
+                    }),
+                );
+            }
+        }
+    };
+
+    // 3. Obtener rol del usuario objetivo
+    let target_user_check = sqlx::query_as::<_, (String,)>(
+        "SELECT rol FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2"
+    )
+    .bind(nodo_id)
+    .bind(target_user_id)
+    .fetch_optional(&state.pool)
+    .await;
+
+    let target_rol = match target_user_check {
+        Ok(Some((rol,))) => rol,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(UpdateRolResponse {
+                    success: false,
+                    message: "El usuario objetivo no es miembro de este nodo.".to_string(),
+                }),
+            );
+        }
+        Err(e) => {
+            eprintln!("Error al verificar usuario objetivo para expulsar: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(UpdateRolResponse {
+                    success: false,
+                    message: "Error interno al verificar el miembro.".to_string(),
+                }),
+            );
+        }
+    };
+
+    // 4. Validar permisos de jerarquía
+    // - El OWNER o ADMIN GLOBAL puede expulsar a cualquiera
+    // - Un ADMIN de nodo puede expulsar a un MEMBER, pero no a otro ADMIN ni al OWNER
+    let is_authorized = if current_rol == "OWNER" || current_rol == "GLOBAL_ADMIN" {
+        true
+    } else if current_rol == "ADMIN" {
+        target_rol == "MEMBER"
+    } else {
+        false
+    };
+
+    if !is_authorized {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(UpdateRolResponse {
+                success: false,
+                message: "No tienes permisos suficientes para expulsar a este usuario.".to_string(),
+            }),
+        );
+    }
+
+    // 5. Eliminar de la base de datos
+    let delete_result = sqlx::query(
+        "DELETE FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2"
+    )
+    .bind(nodo_id)
+    .bind(target_user_id)
+    .execute(&state.pool)
+    .await;
+
+    match delete_result {
+        Ok(_) => (
+            StatusCode::OK,
+            Json(UpdateRolResponse {
+                success: true,
+                message: "Miembro expulsado del nodo exitosamente.".to_string(),
+            }),
+        ),
+        Err(e) => {
+            eprintln!("Error al expulsar miembro: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(UpdateRolResponse {
+                    success: false,
+                    message: "Error interno al expulsar al miembro.".to_string(),
+                }),
+            )
+        }
+    }
+}
+
+// ─── POST /nodos/{id}/miembros/{user_id}/ban ─────────────────────────────
+
+pub async fn ban_miembro(
+    State(state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
+    axum::extract::Path((nodo_id, target_user_id)): axum::extract::Path<(Uuid, Uuid)>,
+) -> (StatusCode, Json<UpdateRolResponse>) {
+    // 1. No se puede banear a sí mismo
+    if auth_user.user_id == target_user_id {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(UpdateRolResponse {
+                success: false,
+                message: "No puedes banearte a ti mismo del nodo.".to_string(),
+            }),
+        );
+    }
+
+    // 2. Obtener rol del usuario actual en el nodo
+    let current_user_check = sqlx::query_as::<_, (String,)>(
+        "SELECT rol FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2"
+    )
+    .bind(nodo_id)
+    .bind(auth_user.user_id)
+    .fetch_optional(&state.pool)
+    .await;
+
+    let current_rol = match current_user_check {
+        Ok(Some((rol,))) => rol,
+        _ => {
+            if auth_user.role == "ADMIN" {
+                "GLOBAL_ADMIN".to_string()
+            } else {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(UpdateRolResponse {
+                        success: false,
+                        message: "No eres miembro de este nodo ni administrador global.".to_string(),
+                    }),
+                );
+            }
+        }
+    };
+
+    // 3. Obtener rol del usuario objetivo
+    let target_user_check = sqlx::query_as::<_, (String,)>(
+        "SELECT rol FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2"
+    )
+    .bind(nodo_id)
+    .bind(target_user_id)
+    .fetch_optional(&state.pool)
+    .await;
+
+    let target_rol = match target_user_check {
+        Ok(Some((rol,))) => rol,
+        Ok(None) => {
+            // El usuario podría no ser miembro pero queremos banearlo igual para evitar que entre
+            "NONE".to_string()
+        }
+        Err(e) => {
+            eprintln!("Error al verificar usuario objetivo para banear: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(UpdateRolResponse {
+                    success: false,
+                    message: "Error interno al verificar el miembro.".to_string(),
+                }),
+            );
+        }
+    };
+
+    // 4. Validar permisos de jerarquía
+    let is_authorized = if current_rol == "OWNER" || current_rol == "GLOBAL_ADMIN" {
+        target_rol != "OWNER" // El owner no puede ser baneado por nadie
+    } else if current_rol == "ADMIN" {
+        target_rol == "MEMBER" || target_rol == "NONE"
+    } else {
+        false
+    };
+
+    if !is_authorized {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(UpdateRolResponse {
+                success: false,
+                message: "No tienes permisos suficientes para banear a este usuario.".to_string(),
+            }),
+        );
+    }
+
+    // Iniciar transacción para banear y eliminar membresía de manera atómica
+    let mut tx = match state.pool.begin().await {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("Error al iniciar transacción para baneo: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(UpdateRolResponse {
+                    success: false,
+                    message: "Error interno al iniciar baneo.".to_string(),
+                }),
+            );
+        }
+    };
+
+    // Insertar en la tabla de baneos
+    let ban_result = sqlx::query(
+        "INSERT INTO nodo_baneos (nodo_id, user_id, creado_por) VALUES ($1, $2, $3) ON CONFLICT (nodo_id, user_id) DO NOTHING"
+    )
+    .bind(nodo_id)
+    .bind(target_user_id)
+    .bind(auth_user.user_id)
+    .execute(&mut *tx)
+    .await;
+
+    if let Err(e) = ban_result {
+        eprintln!("Error al registrar baneo en DB: {}", e);
+        let _ = tx.rollback().await;
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(UpdateRolResponse {
+                success: false,
+                message: "Error al registrar baneo en la base de datos.".to_string(),
+            }),
+        );
+    }
+
+    // Eliminar de nodo_miembros
+    let kick_result = sqlx::query(
+        "DELETE FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2"
+    )
+    .bind(nodo_id)
+    .bind(target_user_id)
+    .execute(&mut *tx)
+    .await;
+
+    if let Err(e) = kick_result {
+        eprintln!("Error al remover membresía durante baneo: {}", e);
+        let _ = tx.rollback().await;
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(UpdateRolResponse {
+                success: false,
+                message: "Error al remover membresía del usuario baneado.".to_string(),
+            }),
+        );
+    }
+
+    if let Err(e) = tx.commit().await {
+        eprintln!("Error al confirmar transacción de baneo: {}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(UpdateRolResponse {
+                success: false,
+                message: "Error al completar la operación de baneo.".to_string(),
+            }),
+        );
+    }
+
+    (
+        StatusCode::OK,
+        Json(UpdateRolResponse {
+            success: true,
+            message: "Usuario baneado del nodo exitosamente.".to_string(),
+        }),
+    )
+}
+
+// ─── DELETE /nodos/{id}/baneos/{user_id} ─────────────────────────────────
+
+pub async fn unban_miembro(
+    State(state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
+    axum::extract::Path((nodo_id, target_user_id)): axum::extract::Path<(Uuid, Uuid)>,
+) -> (StatusCode, Json<UpdateRolResponse>) {
+    // 1. Obtener rol en el nodo
+    let current_user_check = sqlx::query_as::<_, (String,)>(
+        "SELECT rol FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2"
+    )
+    .bind(nodo_id)
+    .bind(auth_user.user_id)
+    .fetch_optional(&state.pool)
+    .await;
+
+    let current_rol = match current_user_check {
+        Ok(Some((rol,))) => rol,
+        _ => {
+            if auth_user.role == "ADMIN" {
+                "GLOBAL_ADMIN".to_string()
+            } else {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(UpdateRolResponse {
+                        success: false,
+                        message: "No eres miembro de este nodo ni administrador global.".to_string(),
+                    }),
+                );
+            }
+        }
+    };
+
+    // 2. Solo OWNER, ADMIN de nodo o ADMIN global pueden desbanear
+    if current_rol != "OWNER" && current_rol != "ADMIN" && current_rol != "GLOBAL_ADMIN" {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(UpdateRolResponse {
+                success: false,
+                message: "No tienes permisos suficientes para desbanear usuarios.".to_string(),
+            }),
+        );
+    }
+
+    // 3. Eliminar de la tabla de baneos
+    let delete_result = sqlx::query(
+        "DELETE FROM nodo_baneos WHERE nodo_id = $1 AND user_id = $2"
+    )
+    .bind(nodo_id)
+    .bind(target_user_id)
+    .execute(&state.pool)
+    .await;
+
+    match delete_result {
+        Ok(r) => {
+            if r.rows_affected() == 0 {
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(UpdateRolResponse {
+                        success: false,
+                        message: "Este usuario no está baneado en este nodo.".to_string(),
+                    }),
+                )
+            } else {
+                (
+                    StatusCode::OK,
+                    Json(UpdateRolResponse {
+                        success: true,
+                        message: "Baneo revocado exitosamente.".to_string(),
+                    }),
+                )
+            }
+        }
+        Err(e) => {
+            eprintln!("Error al remover baneo: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(UpdateRolResponse {
+                    success: false,
+                    message: "Error interno al remover el baneo.".to_string(),
+                }),
+            )
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct NodoBaneoInfo {
+    pub user_id: Uuid,
+    pub name: String,
+    pub email: String,
+    pub creado_por_nombre: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
+pub struct BaneosResponse {
+    pub success: bool,
+    pub message: String,
+    pub baneos: Vec<NodoBaneoInfo>,
+}
+
+// ─── GET /nodos/{id}/baneos ──────────────────────────────────────────────
+
+pub async fn list_baneos(
+    State(state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
+    axum::extract::Path(id): axum::extract::Path<Uuid>,
+) -> (StatusCode, Json<BaneosResponse>) {
+    // 1. Verificar si el usuario actual es miembro del nodo o admin global
+    let member_check = sqlx::query_as::<_, (String,)>(
+        "SELECT rol FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2"
+    )
+    .bind(id)
+    .bind(auth_user.user_id)
+    .fetch_optional(&state.pool)
+    .await;
+
+    let is_member = match member_check {
+        Ok(Some((rol,))) => rol == "OWNER" || rol == "ADMIN",
+        _ => auth_user.role == "ADMIN",
+    };
+
+    if !is_member {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(BaneosResponse {
+                success: false,
+                message: "No tienes permiso para ver los baneados de este nodo.".to_string(),
+                baneos: vec![],
+            }),
+        );
+    }
+
+    // 2. Obtener lista de baneos
+    let rows = sqlx::query_as::<_, (Uuid, String, String, Option<String>, chrono::DateTime<chrono::Utc>)>(
+        r#"
+        SELECT u.id, u.name, u.email, uc.name as creado_por_nombre, nb.created_at
+        FROM nodo_baneos nb
+        INNER JOIN users u ON nb.user_id = u.id
+        LEFT JOIN users uc ON nb.creado_por = uc.id
+        WHERE nb.nodo_id = $1
+        ORDER BY nb.created_at DESC
+        "#
+    )
+    .bind(id)
+    .fetch_all(&state.pool)
+    .await;
+
+    match rows {
+        Ok(baneos) => {
+            let list = baneos
+                .into_iter()
+                .map(|(user_id, name, email, creado_por_nombre, created_at)| NodoBaneoInfo {
+                    user_id,
+                    name,
+                    email,
+                    creado_por_nombre,
+                    created_at,
+                })
+                .collect();
+
+            (
+                StatusCode::OK,
+                Json(BaneosResponse {
+                    success: true,
+                    message: "Baneos cargados exitosamente.".to_string(),
+                    baneos: list,
+                }),
+            )
+        }
+        Err(e) => {
+            eprintln!("Error al obtener baneos del nodo: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaneosResponse {
+                    success: false,
+                    message: "Error interno al obtener la lista de baneos.".to_string(),
+                    baneos: vec![],
+                }),
+            )
+        }
+    }
+}
+
+// ─── DTOs y Estructuras para Chat ────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct SendMensajeDto {
+    pub contenido: String,
+}
+
+#[derive(Serialize)]
+pub struct MensajeInfo {
+    pub id: Uuid,
+    pub nodo_id: Uuid,
+    pub user_id: Uuid,
+    pub user_name: String,
+    pub contenido: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
+pub struct MensajeResponse {
+    pub success: bool,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mensaje: Option<MensajeInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mensajes: Option<Vec<MensajeInfo>>,
+}
+
+// ─── POST /nodos/{id}/mensajes ───────────────────────────────────────────
+
+pub async fn send_mensaje(
+    State(state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
+    axum::extract::Path(id): axum::extract::Path<Uuid>,
+    Json(payload): Json<SendMensajeDto>,
+) -> (StatusCode, Json<MensajeResponse>) {
+    let contenido = payload.contenido.trim();
+    if contenido.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(MensajeResponse {
+                success: false,
+                message: "El contenido del mensaje no puede estar vacío.".to_string(),
+                mensaje: None,
+                mensajes: None,
+            }),
+        );
+    }
+
+    // 1. Verificar si el usuario es miembro del nodo
+    let member_check = sqlx::query_as::<_, (String,)>(
+        "SELECT rol FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2"
+    )
+    .bind(id)
+    .bind(auth_user.user_id)
+    .fetch_optional(&state.pool)
+    .await;
+
+    if let Ok(None) = member_check {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(MensajeResponse {
+                success: false,
+                message: "No tienes permiso para enviar mensajes en este nodo ya que no eres miembro.".to_string(),
+                mensaje: None,
+                mensajes: None,
+            }),
+        );
+    }
+
+    // 2. Insertar mensaje en la base de datos
+    let insert = sqlx::query_as::<_, (Uuid, Uuid, Uuid, String, chrono::DateTime<chrono::Utc>)>(
+        r#"
+        INSERT INTO mensajes (nodo_id, user_id, contenido) VALUES ($1, $2, $3)
+        RETURNING id, nodo_id, user_id, contenido, created_at
+        "#
+    )
+    .bind(id)
+    .bind(auth_user.user_id)
+    .bind(contenido)
+    .fetch_one(&state.pool)
+    .await;
+
+    match insert {
+        Ok((msg_id, nodo_id, user_id, contenido, created_at)) => {
+            // Obtener el nombre del usuario
+            let user_name = sqlx::query_as::<_, (String,)>(
+                "SELECT name FROM users WHERE id = $1"
+            )
+            .bind(user_id)
+            .fetch_one(&state.pool)
+            .await
+            .map(|r| r.0)
+            .unwrap_or_else(|_| "Usuario".to_string());
+
+            (
+                StatusCode::CREATED,
+                Json(MensajeResponse {
+                    success: true,
+                    message: "Mensaje enviado exitosamente.".to_string(),
+                    mensaje: Some(MensajeInfo {
+                        id: msg_id,
+                        nodo_id,
+                        user_id,
+                        user_name,
+                        contenido,
+                        created_at,
+                    }),
+                    mensajes: None,
+                }),
+            )
+        }
+        Err(e) => {
+            eprintln!("Error al enviar mensaje en DB: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(MensajeResponse {
+                    success: false,
+                    message: "Error interno al enviar el mensaje.".to_string(),
+                    mensaje: None,
+                    mensajes: None,
+                }),
+            )
+        }
+    }
+}
+
+// ─── GET /nodos/{id}/mensajes ────────────────────────────────────────────
+
+pub async fn list_mensajes(
+    State(state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
+    axum::extract::Path(id): axum::extract::Path<Uuid>,
+) -> (StatusCode, Json<MensajeResponse>) {
+    // 1. Verificar si el usuario es miembro del nodo
+    let member_check = sqlx::query_as::<_, (String,)>(
+        "SELECT rol FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2"
+    )
+    .bind(id)
+    .bind(auth_user.user_id)
+    .fetch_optional(&state.pool)
+    .await;
+
+    if let Ok(None) = member_check {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(MensajeResponse {
+                success: false,
+                message: "No tienes permiso para ver los mensajes de este nodo ya que no eres miembro.".to_string(),
+                mensaje: None,
+                mensajes: None,
+            }),
+        );
+    }
+
+    // 2. Obtener lista de mensajes ordenada por fecha (más antiguos primero para flujo de chat)
+    let rows = sqlx::query_as::<_, (Uuid, Uuid, Uuid, String, String, chrono::DateTime<chrono::Utc>)>(
+        r#"
+        SELECT m.id, m.nodo_id, m.user_id, u.name as user_name, m.contenido, m.created_at
+        FROM mensajes m
+        INNER JOIN users u ON m.user_id = u.id
+        WHERE m.nodo_id = $1
+        ORDER BY m.created_at ASC
+        LIMIT 100
+        "#
+    )
+    .bind(id)
+    .fetch_all(&state.pool)
+    .await;
+
+    match rows {
+        Ok(msgs) => {
+            let list = msgs
+                .into_iter()
+                .map(|(msg_id, nodo_id, user_id, user_name, contenido, created_at)| {
+                    MensajeInfo {
+                        id: msg_id,
+                        nodo_id,
+                        user_id,
+                        user_name,
+                        contenido,
+                        created_at,
+                    }
+                })
+                .collect();
+
+            (
+                StatusCode::OK,
+                Json(MensajeResponse {
+                    success: true,
+                    message: "Mensajes cargados exitosamente.".to_string(),
+                    mensaje: None,
+                    mensajes: Some(list),
+                }),
+            )
+        }
+        Err(e) => {
+            eprintln!("Error al cargar mensajes: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(MensajeResponse {
+                    success: false,
+                    message: "Error interno al cargar los mensajes.".to_string(),
+                    mensaje: None,
+                    mensajes: None,
                 }),
             )
         }

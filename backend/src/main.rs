@@ -70,8 +70,15 @@ async fn main() {
         .route("/nodos", get(nodos::service::list_nodos))
         .route("/nodos/join/{token}", post(nodos::service::join_nodo))
         .route("/nodos/{id}", delete(nodos::service::delete_nodo))
+        .route("/nodos/{id}/leave", post(nodos::service::leave_nodo))
         .route("/nodos/{id}/miembros", get(nodos::service::list_miembros))
+        .route("/nodos/{id}/miembros/{user_id}", delete(nodos::service::kick_miembro))
+        .route("/nodos/{id}/miembros/{user_id}/ban", post(nodos::service::ban_miembro))
         .route("/nodos/{id}/miembros/{user_id}/rol", put(nodos::service::update_miembro_rol))
+        .route("/nodos/{id}/baneos", get(nodos::service::list_baneos))
+        .route("/nodos/{id}/baneos/{user_id}", delete(nodos::service::unban_miembro))
+        .route("/nodos/{id}/mensajes", post(nodos::service::send_mensaje))
+        .route("/nodos/{id}/mensajes", get(nodos::service::list_mensajes))
         .layer(middleware::from_fn(auth::middleware::jwt_auth));
 
     // 8. Rutas de administrador (requieren JWT + rol ADMIN)

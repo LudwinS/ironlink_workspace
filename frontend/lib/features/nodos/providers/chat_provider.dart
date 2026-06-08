@@ -1,0 +1,118 @@
+import 'dart:async';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../data/nodos_repository.dart';
+import 'nodos_provider.dart';
+
+class ChatMessagesState {
+  final List<Mensaje> mensajes;
+  final bool loading;
+  final String? error;
+
+  const ChatMessagesState({
+    this.mensajes = const [],
+    this.loading = false,
+    this.error,
+  });
+
+  ChatMessagesState copyWith({
+    List<Mensaje>? mensajes,
+    bool? loading,
+    String? error,
+  }) {
+    return ChatMessagesState(
+      mensajes: mensajes ?? this.mensajes,
+      loading: loading ?? this.loading,
+      error: error,
+    );
+  }
+}
+
+class ChatMessagesNotifier extends StateNotifier<ChatMessagesState> {
+  final NodosRepository _repository;
+  final Ref _ref;
+  Timer? _timer;
+  String? _activeNodoId;
+
+  ChatMessagesNotifier(this._repository, this._ref) : super(const ChatMessagesState()) {
+    // Escuchar el nodo seleccionado para cargar mensajes automáticamente
+    _ref.listen<Nodo?>(selectedNodoProvider, (previous, next) {
+      if (next == null) {
+        _activeNodoId = null;
+        _timer?.cancel();
+        state = const ChatMessagesState();
+      } else {
+        _activeNodoId = next.id;
+        loadMensajes();
+        _startPolling();
+      }
+    });
+
+    // Si ya hay un nodo seleccionado al inicializar
+    final initialNodo = _ref.read(selectedNodoProvider);
+    if (initialNodo != null) {
+      _activeNodoId = initialNodo.id;
+      loadMensajes();
+      _startPolling();
+    }
+  }
+
+  Future<void> loadMensajes({bool silent = false}) async {
+    final nodoId = _activeNodoId;
+    if (nodoId == null) return;
+
+    if (!silent && state.mensajes.isEmpty) {
+      state = state.copyWith(loading: true);
+    }
+
+    try {
+      final list = await _repository.fetchMensajes(nodoId);
+      // Evitar sobreescribir si ya cambiamos de nodo
+      if (_activeNodoId == nodoId) {
+        state = state.copyWith(mensajes: list, loading: false);
+      }
+    } catch (e) {
+      if (_activeNodoId == nodoId && !silent) {
+        state = state.copyWith(
+          error: e.toString().replaceAll('Exception: ', ''),
+          loading: false,
+        );
+      }
+    }
+  }
+
+  void _startPolling() {
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 2), (_) {
+      loadMensajes(silent: true);
+    });
+  }
+
+  Future<bool> sendMensaje(String contenido) async {
+    final nodoId = _activeNodoId;
+    if (nodoId == null || contenido.trim().isEmpty) return false;
+
+    try {
+      final msg = await _repository.sendMensaje(nodoId, contenido.trim());
+      if (_activeNodoId == nodoId) {
+        state = state.copyWith(
+          mensajes: [...state.mensajes, msg],
+        );
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+}
+
+final chatMessagesProvider =
+    StateNotifierProvider.autoDispose<ChatMessagesNotifier, ChatMessagesState>((ref) {
+  final repo = ref.watch(nodosRepositoryProvider);
+  return ChatMessagesNotifier(repo, ref);
+});

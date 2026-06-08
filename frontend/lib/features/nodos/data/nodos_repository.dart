@@ -201,6 +201,105 @@ class NodosRepository {
     }
   }
 
+  /// Sale de un nodo.
+  /// POST /nodos/:id/leave
+  Future<void> leaveNodo(String id) async {
+    try {
+      await _client.post('/nodos/$id/leave');
+    } on DioException catch (e) {
+      final msg = _extractErrorMessage(e, 'Error al salir del nodo');
+      throw Exception(msg);
+    }
+  }
+
+  /// Expulsa a un usuario de un nodo.
+  /// DELETE /nodos/:id/miembros/:user_id
+  Future<void> kickMiembro(String nodoId, String userId) async {
+    try {
+      await _client.delete('/nodos/$nodoId/miembros/$userId');
+    } on DioException catch (e) {
+      final msg = _extractErrorMessage(e, 'Error al expulsar al miembro');
+      throw Exception(msg);
+    }
+  }
+
+  /// Banea a un usuario de un nodo.
+  /// POST /nodos/:id/miembros/:user_id/ban
+  Future<void> banMiembro(String nodoId, String userId) async {
+    try {
+      await _client.post('/nodos/$nodoId/miembros/$userId/ban');
+    } on DioException catch (e) {
+      final msg = _extractErrorMessage(e, 'Error al banear al usuario');
+      throw Exception(msg);
+    }
+  }
+
+  /// Quita el baneo a un usuario.
+  /// DELETE /nodos/:id/baneos/:user_id
+  Future<void> unbanMiembro(String nodoId, String userId) async {
+    try {
+      await _client.delete('/nodos/$nodoId/baneos/$userId');
+    } on DioException catch (e) {
+      final msg = _extractErrorMessage(e, 'Error al remover el baneo');
+      throw Exception(msg);
+    }
+  }
+
+  /// Obtiene la lista de usuarios baneados de un nodo.
+  /// GET /nodos/:id/baneos
+  Future<List<NodoBaneo>> fetchBaneados(String nodoId) async {
+    try {
+      final response = await _client.get('/nodos/$nodoId/baneos');
+      final data = response.data;
+      if (data is Map<String, dynamic> && data['baneos'] is List) {
+        return (data['baneos'] as List)
+            .map((e) => NodoBaneo.fromJson(e as Map<String, dynamic>))
+            .toList();
+      }
+      return [];
+    } on DioException catch (e) {
+      final msg = _extractErrorMessage(e, 'Error al obtener la lista de baneos');
+      throw Exception(msg);
+    }
+  }
+
+  /// Obtiene los últimos 100 mensajes de un nodo.
+  /// GET /nodos/:id/mensajes
+  Future<List<Mensaje>> fetchMensajes(String nodoId) async {
+    try {
+      final response = await _client.get('/nodos/$nodoId/mensajes');
+      final data = response.data;
+      if (data is Map<String, dynamic> && data['mensajes'] is List) {
+        return (data['mensajes'] as List)
+            .map((e) => Mensaje.fromJson(e as Map<String, dynamic>))
+            .toList();
+      }
+      return [];
+    } on DioException catch (e) {
+      final msg = _extractErrorMessage(e, 'Error al obtener los mensajes');
+      throw Exception(msg);
+    }
+  }
+
+  /// Envía un mensaje a un nodo.
+  /// POST /nodos/:id/mensajes
+  Future<Mensaje> sendMensaje(String nodoId, String contenido) async {
+    try {
+      final response = await _client.post(
+        '/nodos/$nodoId/mensajes',
+        data: {'contenido': contenido},
+      );
+      final data = response.data;
+      if (data is Map<String, dynamic> && data['mensaje'] is Map<String, dynamic>) {
+        return Mensaje.fromJson(data['mensaje'] as Map<String, dynamic>);
+      }
+      throw Exception('Respuesta inesperada del servidor al enviar mensaje');
+    } on DioException catch (e) {
+      final msg = _extractErrorMessage(e, 'Error al enviar el mensaje');
+      throw Exception(msg);
+    }
+  }
+
   /// Extrae un mensaje legible de una respuesta de error Dio.
   String _extractErrorMessage(DioException e, String fallback) {
     final responseData = e.response?.data;
@@ -233,6 +332,65 @@ class NodoMiembro {
       name: json['name'] as String? ?? '',
       email: json['email'] as String? ?? '',
       rol: json['rol'] as String? ?? 'MEMBER',
+    );
+  }
+}
+
+class NodoBaneo {
+  final String userId;
+  final String name;
+  final String email;
+  final String? creadoPorNombre;
+  final DateTime createdAt;
+
+  const NodoBaneo({
+    required this.userId,
+    required this.name,
+    required this.email,
+    this.creadoPorNombre,
+    required this.createdAt,
+  });
+
+  factory NodoBaneo.fromJson(Map<String, dynamic> json) {
+    return NodoBaneo(
+      userId: json['user_id'] as String? ?? json['id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      email: json['email'] as String? ?? '',
+      creadoPorNombre: json['creado_por_nombre'] as String?,
+      createdAt: json['created_at'] != null
+          ? DateTime.tryParse(json['created_at'].toString()) ?? DateTime.now()
+          : DateTime.now(),
+    );
+  }
+}
+
+class Mensaje {
+  final String id;
+  final String nodoId;
+  final String userId;
+  final String userName;
+  final String contenido;
+  final DateTime createdAt;
+
+  const Mensaje({
+    required this.id,
+    required this.nodoId,
+    required this.userId,
+    required this.userName,
+    required this.contenido,
+    required this.createdAt,
+  });
+
+  factory Mensaje.fromJson(Map<String, dynamic> json) {
+    return Mensaje(
+      id: json['id'] as String? ?? '',
+      nodoId: json['nodo_id'] as String? ?? '',
+      userId: json['user_id'] as String? ?? '',
+      userName: json['user_name'] as String? ?? 'Usuario',
+      contenido: json['contenido'] as String? ?? '',
+      createdAt: json['created_at'] != null
+          ? DateTime.tryParse(json['created_at'].toString()) ?? DateTime.now()
+          : DateTime.now(),
     );
   }
 }

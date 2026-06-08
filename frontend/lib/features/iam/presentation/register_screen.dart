@@ -105,7 +105,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               height: 400,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: _mint.withOpacity(0.12),
+                color: _mint.withValues(alpha: 0.12),
               ),
               child: ClipOval(
                 child: BackdropFilter(
@@ -125,7 +125,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               height: 300,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: _cyan.withOpacity(0.06),
+                color: _cyan.withValues(alpha: 0.06),
               ),
               child: ClipOval(
                 child: BackdropFilter(
@@ -156,8 +156,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                           decoration: BoxDecoration(
-                            color: _errorRed.withOpacity(0.1),
-                            border: Border.all(color: _errorRed.withOpacity(0.3)),
+                            color: _errorRed.withValues(alpha: 0.1),
+                            border: Border.all(color: _errorRed.withValues(alpha: 0.3)),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Row(
@@ -180,12 +180,12 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                       Container(
                         padding: const EdgeInsets.all(32),
                         decoration: BoxDecoration(
-                          color: _navy900.withOpacity(0.85),
+                          color: _navy900.withValues(alpha: 0.85),
                           borderRadius: BorderRadius.circular(24),
                           border: Border.all(color: _border, width: 1.5),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.3),
+                              color: Colors.black.withValues(alpha: 0.3),
                               blurRadius: 30,
                               offset: const Offset(0, 15),
                             ),
@@ -303,7 +303,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                                                 _obscurePassword
                                                     ? Icons.visibility_off_outlined
                                                     : Icons.visibility_outlined,
-                                                color: _mint.withOpacity(0.7),
+                                                color: _mint.withValues(alpha: 0.7),
                                                 size: 20,
                                               ),
                                               onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
@@ -343,7 +343,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                                                 _obscureConfirmPassword
                                                     ? Icons.visibility_off_outlined
                                                     : Icons.visibility_outlined,
-                                                color: _mint.withOpacity(0.7),
+                                                color: _mint.withValues(alpha: 0.7),
                                                 size: 20,
                                               ),
                                               onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
@@ -635,10 +635,10 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     return InputDecoration(
       hintText: hint,
       hintStyle: const TextStyle(color: _slate500),
-      prefixIcon: Icon(icon, color: _mint.withOpacity(0.7)),
+      prefixIcon: Icon(icon, color: _mint.withValues(alpha: 0.7)),
       suffixIcon: suffix,
       filled: true,
-      fillColor: _navy950.withOpacity(0.6),
+      fillColor: _navy950.withValues(alpha: 0.6),
       contentPadding: const EdgeInsets.symmetric(vertical: 16),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
@@ -722,7 +722,7 @@ class _PasswordStrengthIndicator extends StatelessWidget {
                   borderRadius: BorderRadius.circular(2),
                   color: index < metCount
                       ? barColor
-                      : _border.withOpacity(0.5),
+                      : _border.withValues(alpha: 0.5),
                 ),
               ),
             );

@@ -91,3 +91,22 @@ CREATE INDEX IF NOT EXISTS idx_verification_tokens_user_id ON verification_token
 CREATE INDEX IF NOT EXISTS idx_verification_tokens_token ON verification_tokens(token);
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_nodo_miembros_user_id ON nodo_miembros(user_id);
+
+-- 10. Tabla de baneos de usuarios en nodos
+CREATE TABLE IF NOT EXISTS nodo_baneos (
+    nodo_id UUID REFERENCES nodos(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    creado_por UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (nodo_id, user_id)
+);
+
+-- 11. Tabla de mensajes de chat en nodos
+CREATE TABLE IF NOT EXISTS mensajes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    nodo_id UUID NOT NULL REFERENCES nodos(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    contenido TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_mensajes_nodo_id ON mensajes(nodo_id);

@@ -161,7 +161,7 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
               height: 400,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: _mint.withOpacity(0.12),
+                color: _mint.withValues(alpha: 0.12),
               ),
               child: ClipOval(
                 child: BackdropFilter(
@@ -319,8 +319,8 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _mint.withOpacity(0.1),
-        border: Border.all(color: _mint.withOpacity(0.3)),
+        color: _mint.withValues(alpha: 0.1),
+        border: Border.all(color: _mint.withValues(alpha: 0.3)),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -342,8 +342,8 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: _errorRed.withOpacity(0.1),
-        border: Border.all(color: _errorRed.withOpacity(0.3)),
+        color: _errorRed.withValues(alpha: 0.1),
+        border: Border.all(color: _errorRed.withValues(alpha: 0.3)),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -368,12 +368,12 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
     return Container(
       padding: const EdgeInsets.all(32),
       decoration: BoxDecoration(
-        color: _navy900.withOpacity(0.85),
+        color: _navy900.withValues(alpha: 0.85),
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: _border, width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: _navy950.withOpacity(0.3),
+            color: _navy950.withValues(alpha: 0.3),
             blurRadius: 30,
             offset: const Offset(0, 15),
           ),
@@ -386,7 +386,7 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: _slate100.withOpacity(0.04),
+              color: _slate100.withValues(alpha: 0.04),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: _border, width: 1),
             ),
@@ -404,10 +404,10 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
             width: 64,
             height: 64,
             decoration: BoxDecoration(
-              color: _mint.withOpacity(0.12),
+              color: _mint.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: _mint.withOpacity(0.25),
+                color: _mint.withValues(alpha: 0.25),
                 width: 1,
               ),
             ),
@@ -528,7 +528,7 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
           width: double.infinity,
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: _navy950.withOpacity(0.6),
+            color: _navy950.withValues(alpha: 0.6),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: _border, width: 1.5),
           ),
@@ -538,9 +538,9 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: _mint.withOpacity(0.1),
+                  color: _mint.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _mint.withOpacity(0.2)),
+                  border: Border.all(color: _mint.withValues(alpha: 0.2)),
                 ),
                 child: Icon(icon, color: _mint, size: 24),
               ),
@@ -617,10 +617,10 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
           width: double.infinity,
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: _mint.withOpacity(0.05),
+            color: _mint.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: _mint.withOpacity(0.3),
+              color: _mint.withValues(alpha: 0.3),
               width: 1,
             ),
           ),
@@ -697,9 +697,9 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
           width: 72,
           height: 72,
           decoration: BoxDecoration(
-            color: _mint.withOpacity(0.1),
+            color: _mint.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: _mint.withOpacity(0.25)),
+            border: Border.all(color: _mint.withValues(alpha: 0.25)),
           ),
           child: const Center(
             child: Icon(Icons.mark_email_read_outlined, color: _mint, size: 36),
@@ -712,9 +712,9 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
           width: double.infinity,
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: _mint.withOpacity(0.05),
+            color: _mint.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: _mint.withOpacity(0.3)),
+            border: Border.all(color: _mint.withValues(alpha: 0.3)),
           ),
           child: Column(
             children: [
@@ -923,8 +923,8 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
                   )
                 : LinearGradient(
                     colors: [
-                      _mint.withOpacity(0.3),
-                      _darkMint.withOpacity(0.3),
+                      _mint.withValues(alpha: 0.3),
+                      _darkMint.withValues(alpha: 0.3),
                     ],
                   ),
             borderRadius: BorderRadius.circular(12),
@@ -946,7 +946,7 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
                     style: TextStyle(
                       color: (_isOtpComplete && !isLoading)
                           ? _slate100
-                          : _slate100.withOpacity(0.5),
+                          : _slate100.withValues(alpha: 0.5),
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 0.5,

@@ -9,10 +9,11 @@
 | Severidad | Abiertos | Resueltos |
 |---|---|---|
 | 🔴 Crítico | 0 | 0 |
-| 🟠 Alto | 0 | 3 |
-| 🟡 Medio | 0 | 1 |
+| 🟠 Alto | 0 | 4 |
+| 🟡 Medio | 0 | 3 |
 | 🟢 Bajo | 0 | 1 |
-| **Total** | **0** | **5** |
+| **Total** | **0** | **8** |
+
 
 ---
 
@@ -115,3 +116,67 @@ La lista de interceptores del cliente HTTP (Dio) duplicaba instancias o se salta
 
 **Solución:**
 Se modificó la inicialización en `api_client.dart` usando un patrón Singleton estricto con un flag de inicialización que garantiza que el interceptor de autorización se configure una única vez y tenga prioridad absoluta sobre las cabeceras HTTP.
+
+---
+
+### BUG-006: Error de correo duplicado fantasma tras retroceder en el registro
+
+| Campo | Detalle |
+|---|---|
+| **Severidad** | 🟠 Alto |
+| **Componente** | Backend / Lógica de Validación |
+| **Archivo(s)** | [service.rs](file:///C:/Users/Ludwin/ironlink_workspace/backend/src/auth/service.rs) |
+| **Estado** | 🟢 Resuelto |
+
+**Descripción:**
+Al no completar el registro (OTP) y volver a iniciar el proceso retrocediendo, el sistema bloqueaba el correo indicando que "ya está registrado" sin haber activado la cuenta.
+
+**Causa:**
+El backend realizaba una inserción directa y bloqueaba por unicidad de base de datos correos o teléfonos existentes de cuentas con estado `PENDING` que no habían finalizado la verificación de correo electrónico.
+
+**Solución:**
+Se modificó `register_user` en el backend para consultar si existen registros duplicados de correo o teléfono antes de la inserción. Si los usuarios duplicados encontrados están en estado `PENDING`, son eliminados automáticamente para permitir el re-registro libre de conflicto; si están en estado `ACTIVE` o `SUSPENDED`, se bloquea el registro arrojando errores específicos por campo.
+
+---
+
+### BUG-007: Falta de validación en campos de teléfono y nombre
+
+| Campo | Detalle |
+|---|---|
+| **Severidad** | 🟡 Medio |
+| **Componente** | Frontend / Validación de Formularios |
+| **Archivo(s)** | [register_screen.dart](file:///C:/Users/Ludwin/ironlink_workspace/frontend/lib/features/iam/presentation/register_screen.dart) |
+| **Estado** | 🟢 Resuelto |
+
+**Descripción:**
+El campo de teléfono aceptaba letras y caracteres especiales, y el campo de nombre se podía enviar vacío o con caracteres inválidos por falta de validaciones en el frontend.
+
+**Causa:**
+El campo de nombre carecía de restricciones de teclado o regex de validación de caracteres válidos, y el campo de teléfono carecía de formateadores limitantes e internacionalización.
+
+**Solución:**
+En `register_screen.dart`:
+- Se agregó `FilteringTextInputFormatter.allow` para restringir el campo de nombre solo a letras, acentos y espacios, junto con una validación de regex y longitud mínima (2 caracteres).
+- Se agregó `FilteringTextInputFormatter.digitsOnly` al campo de teléfono para evitar letras y caracteres especiales.
+- Se implementó un selector de prefijos internacionales en un Dropdown (unión de código de país como +503, +502, +52, +1, etc.) y validación de longitud del número base.
+
+---
+
+### BUG-008: Falta de feedback y validaciones visuales al crear un Nodo con campos vacíos
+
+| Campo | Detalle |
+|---|---|
+| **Severidad** | 🟡 Medio |
+| **Componente** | Frontend / Gestión de Workspaces (Salas) |
+| **Archivo(s)** | [dashboard_screen.dart](file:///C:/Users/Ludwin/ironlink_workspace/frontend/lib/features/nodos/presentation/dashboard_screen.dart) |
+| **Estado** | 🟢 Resuelto |
+
+**Descripción:**
+Al intentar crear un Nodo con campos obligatorios vacíos, la interfaz no mostraba alertas visuales ni advertencias en rojo, dejando al usuario sin retroalimentación sobre la acción.
+
+**Causa:**
+Los diálogos de creación (`_CreateNodoDialog`) y unión (`_JoinNodoDialog`) usaban campos de texto planos `TextField` sin un contenedor de formulario (`Form`) ni validadores, limitándose a rechazar la acción de manera silenciosa en el código.
+
+**Solución:**
+Se envolvió el diseño interno de `_CreateNodoDialog` y `_JoinNodoDialog` en widgets `Form` con llaves globales de estado (`FormState`). Se adaptó el widget común `_DialogTextField` para usar `TextFormField` internamente, implementando validadores visuales para el nombre del nodo y el token de acceso, mostrando mensajes descriptivos y bordes rojos si se envían vacíos.
+

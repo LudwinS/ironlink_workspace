@@ -168,6 +168,32 @@ class NodosNotifier extends StateNotifier<NodosState> {
     }
   }
 
+  /// Sale de un nodo por su ID.
+  Future<bool> leaveNodo(String id) async {
+    state = state.copyWith(status: NodosStatus.loading);
+    try {
+      // Buscar el nodo en el estado local para obtener su nombre
+      final nodo = state.nodos.firstWhere((n) => n.id == id);
+      final nombre = nodo.nombre;
+
+      await _repository.leaveNodo(id);
+
+      final updatedNodos = state.nodos.where((n) => n.id != id).toList();
+      state = state.copyWith(
+        status: NodosStatus.loaded,
+        nodos: updatedNodos,
+        successMessage: 'Has salido del nodo "$nombre" exitosamente',
+      );
+      return true;
+    } catch (e) {
+      state = state.copyWith(
+        status: NodosStatus.loaded,
+        errorMessage: e.toString().replaceAll('Exception: ', ''),
+      );
+      return false;
+    }
+  }
+
   /// Limpia los mensajes temporales.
   void clearMessages() {
     state = state.copyWith(errorMessage: null, successMessage: null);
@@ -204,3 +230,6 @@ final userEmailProvider = Provider<String>((ref) {
   final authState = ref.watch(authProvider);
   return authState.email ?? '';
 });
+
+/// Provider para el nodo seleccionado en el dashboard (área de chat)
+final selectedNodoProvider = StateProvider.autoDispose<Nodo?>((ref) => null);

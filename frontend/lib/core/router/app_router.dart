@@ -11,7 +11,6 @@ import '../../features/iam/providers/auth_provider.dart';
 final routerNotifierProvider = Provider<RouterNotifier>((ref) {
   final notifier = RouterNotifier();
   ref.listen<AuthState>(authProvider, (previous, next) {
-    print("DEBUG: RouterNotifier - authProvider status changed: ${previous?.status} -> ${next.status}");
     notifier.notify();
   });
   return notifier;
@@ -33,8 +32,6 @@ final routerProvider = Provider<GoRouter>((ref) {
       final authState = ref.read(authProvider);
       final isLoggedIn = authState.status == AuthStatus.authenticated;
       
-      print("DEBUG: RouterRedirect - matchedLocation: ${state.matchedLocation}, isLoggedIn: $isLoggedIn (status: ${authState.status})");
-      
       final isGoingToAuth = state.matchedLocation == '/login' ||
           state.matchedLocation == '/register' ||
           state.matchedLocation == '/verification' ||
@@ -42,16 +39,13 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       if (!isLoggedIn) {
         if (!isGoingToAuth) {
-          print("DEBUG: RouterRedirect - No está logueado y va a ruta protegida. Redirigiendo a /login");
           return '/login';
         }
       } else {
         if (isGoingToAuth && state.matchedLocation != '/verification') {
-          print("DEBUG: RouterRedirect - Está logueado e iba a Auth. Redirigiendo a /home");
           return '/home';
         }
       }
-      print("DEBUG: RouterRedirect - No se requiere redirección. Retornando null");
       return null;
     },
     routes: [

@@ -6,6 +6,7 @@ enum AuthStatus { initial, loading, unauthenticated, verificationPending, verifi
 
 class AuthState {
   final AuthStatus status;
+  final String? userId;
   final String? username;
   final String? email;
   final String? role;
@@ -17,6 +18,7 @@ class AuthState {
 
   AuthState({
     this.status = AuthStatus.initial,
+    this.userId,
     this.username,
     this.email,
     this.role,
@@ -28,6 +30,7 @@ class AuthState {
 
   AuthState copyWith({
     AuthStatus? status,
+    String? userId,
     String? username,
     String? email,
     String? role,
@@ -41,6 +44,7 @@ class AuthState {
   }) {
     return AuthState(
       status: status ?? this.status,
+      userId: userId ?? this.userId,
       username: username ?? this.username,
       email: email ?? this.email,
       role: role ?? this.role,
@@ -56,39 +60,34 @@ class AuthNotifier extends StateNotifier<AuthState> {
   final IamRepository _repository;
 
   AuthNotifier(this._repository) : super(AuthState()) {
-    checkPersistedSession();
+    _checkPersistedSession();
   }
 
-  Future<void> checkPersistedSession() async {
-    print("DEBUG: AuthNotifier - checkPersistedSession() iniciado");
+  Future<void> _checkPersistedSession() async {
     state = state.copyWith(status: AuthStatus.loading);
     try {
       final rememberMe = await SecureVault.getRememberMe();
-      print("DEBUG: AuthNotifier - rememberMe leído de SecureVault: $rememberMe");
       if (!rememberMe) {
-        print("DEBUG: AuthNotifier - rememberMe es falso, limpiando session data...");
         await SecureVault.clearAuthData();
       }
 
       final hasSession = await SecureVault.hasSession();
-      print("DEBUG: AuthNotifier - hasSession check: $hasSession");
       if (hasSession) {
+        final userId = await SecureVault.getUserId();
         final username = await SecureVault.getUsername();
         final email = await SecureVault.getEmail();
         final role = await SecureVault.getRole();
-        print("DEBUG: AuthNotifier - Sesión persistida encontrada. Usuario: $username, Rol: $role");
         state = AuthState(
           status: AuthStatus.authenticated,
+          userId: userId,
           username: username,
           email: email,
           role: role,
         );
       } else {
-        print("DEBUG: AuthNotifier - No hay sesión persistida activa");
         state = AuthState(status: AuthStatus.unauthenticated);
       }
     } catch (e) {
-      print("DEBUG: AuthNotifier - ERROR en checkPersistedSession: $e");
       state = AuthState(status: AuthStatus.unauthenticated);
     }
   }
@@ -143,26 +142,23 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<bool> login(String email, String password, {bool rememberMe = false}) async {
-    print("DEBUG: AuthNotifier - login() iniciado. Email: $email, rememberMe: $rememberMe");
     state = state.copyWith(
       status: AuthStatus.loading,
       clearErrors: true,
       clearSuccess: true,
     );
     try {
-      print("DEBUG: AuthNotifier - Llamando a _repository.login...");
       final userData = await _repository.login(email: email, password: password, rememberMe: rememberMe);
-      print("DEBUG: AuthNotifier - _repository.login exitoso. Datos retornados: $userData");
 
       state = AuthState(
         status: AuthStatus.authenticated,
+        userId: userData['userId'],
         username: userData['username'],
         email: userData['email'],
         role: userData['role'],
       );
       return true;
     } catch (e) {
-      print("DEBUG: AuthNotifier - ERROR en login(): $e");
       state = state.copyWith(
         status: AuthStatus.unauthenticated,
         errorMessage: e.toString().replaceAll('Exception: ', ''),

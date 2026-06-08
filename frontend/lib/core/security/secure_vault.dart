@@ -11,6 +11,7 @@ class SecureVault {
   static const String _usernameKey = 'username';
   static const String _emailKey = 'email';
   static const String _roleKey = 'role';
+  static const String _userIdKey = 'user_id';
   static const String _rememberMeKey = 'remember_me';
 
   // In-memory cache to prevent DPAPI registry write latency on immediate reads
@@ -19,6 +20,7 @@ class SecureVault {
   static String? _cachedUsername;
   static String? _cachedEmail;
   static String? _cachedRole;
+  static String? _cachedUserId;
   static bool? _cachedRememberMe;
 
   static Future<void> saveAuthData({
@@ -27,6 +29,7 @@ class SecureVault {
     required String username,
     required String email,
     required String role,
+    required String userId,
     bool rememberMe = false,
   }) async {
     _cachedAccessToken = accessToken;
@@ -34,6 +37,7 @@ class SecureVault {
     _cachedUsername = username;
     _cachedEmail = email;
     _cachedRole = role;
+    _cachedUserId = userId;
     _cachedRememberMe = rememberMe;
 
     await Future.wait([
@@ -42,6 +46,7 @@ class SecureVault {
       _storage.write(key: _usernameKey, value: username),
       _storage.write(key: _emailKey, value: email),
       _storage.write(key: _roleKey, value: role),
+      _storage.write(key: _userIdKey, value: userId),
       _storage.write(key: _rememberMeKey, value: rememberMe ? 'true' : 'false'),
     ]);
   }
@@ -81,12 +86,18 @@ class SecureVault {
     return val;
   }
 
+  static Future<String?> getUserId() async {
+    if (_cachedUserId != null) return _cachedUserId;
+    final val = await _storage.read(key: _userIdKey);
+    _cachedUserId = val;
+    return val;
+  }
+
   static Future<bool> getRememberMe() async {
     if (_cachedRememberMe != null) return _cachedRememberMe!;
     final val = await _storage.read(key: _rememberMeKey);
-    final res = val == 'true';
-    _cachedRememberMe = res;
-    return res;
+    _cachedRememberMe = val == 'true';
+    return _cachedRememberMe!;
   }
 
   static Future<void> clearAuthData() async {
@@ -95,6 +106,7 @@ class SecureVault {
     _cachedUsername = null;
     _cachedEmail = null;
     _cachedRole = null;
+    _cachedUserId = null;
     _cachedRememberMe = null;
 
     await Future.wait([
@@ -103,6 +115,7 @@ class SecureVault {
       _storage.delete(key: _usernameKey),
       _storage.delete(key: _emailKey),
       _storage.delete(key: _roleKey),
+      _storage.delete(key: _userIdKey),
       _storage.delete(key: _rememberMeKey),
     ]);
   }

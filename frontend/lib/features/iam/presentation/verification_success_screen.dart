@@ -85,7 +85,7 @@ class _VerificationSuccessScreenState
               height: 400,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: _mint.withOpacity(0.12),
+                color: _mint.withValues(alpha: 0.12),
               ),
               child: ClipOval(
                 child: BackdropFilter(
@@ -239,12 +239,12 @@ class _VerificationSuccessScreenState
     return Container(
       padding: const EdgeInsets.all(32),
       decoration: BoxDecoration(
-        color: _navy900.withOpacity(0.85),
+        color: _navy900.withValues(alpha: 0.85),
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: _border, width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: _navy950.withOpacity(0.3),
+            color: _navy950.withValues(alpha: 0.3),
             blurRadius: 30,
             offset: const Offset(0, 15),
           ),
@@ -257,7 +257,7 @@ class _VerificationSuccessScreenState
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: _slate100.withOpacity(0.04),
+              color: _slate100.withValues(alpha: 0.04),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: _border, width: 1),
             ),
@@ -334,11 +334,11 @@ class _VerificationSuccessScreenState
         height: 80,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: _mint.withOpacity(0.12),
-          border: Border.all(color: _mint.withOpacity(0.4), width: 2.5),
+          color: _mint.withValues(alpha: 0.12),
+          border: Border.all(color: _mint.withValues(alpha: 0.4), width: 2.5),
           boxShadow: [
             BoxShadow(
-              color: _mint.withOpacity(0.15),
+              color: _mint.withValues(alpha: 0.15),
               blurRadius: 24,
               spreadRadius: 4,
             ),
@@ -367,7 +367,7 @@ class _VerificationSuccessScreenState
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: _navy950.withOpacity(0.5),
+        color: _navy950.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: _border, width: 1),
       ),
@@ -553,3 +553,4 @@ class _VerificationSuccessScreenState
     );
   }
 }
+

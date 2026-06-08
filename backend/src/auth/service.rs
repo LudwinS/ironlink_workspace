@@ -98,21 +98,118 @@ pub async fn register_user(
     State(state): State<AppState>,
     Json(payload): Json<RegisterUserDto>,
 ) -> (StatusCode, Json<ApiResponse>) {
+    let mut field_errors = HashMap::new();
 
-    // 1. Validar contraseña con criterios de seguridad
+    // 1. Validar nombre
+    let trimmed_name = payload.name.trim();
+    if trimmed_name.is_empty() {
+        field_errors.insert("name".to_string(), "El nombre no puede estar vacío.".to_string());
+    } else if trimmed_name.chars().count() < 2 {
+        field_errors.insert("name".to_string(), "El nombre debe tener al menos 2 caracteres.".to_string());
+    }
+
+    // 2. Validar email
+    let trimmed_email = payload.email.trim();
+    if trimmed_email.is_empty() {
+        field_errors.insert("email".to_string(), "El correo electrónico es requerido.".to_string());
+    } else if !trimmed_email.contains('@') {
+        field_errors.insert("email".to_string(), "Formato de correo electrónico inválido.".to_string());
+    }
+
+    // 3. Validar teléfono (esperado con prefijo internacional, ej. +50312345678)
+    let trimmed_phone = payload.phone.trim();
+    if trimmed_phone.is_empty() {
+        field_errors.insert("phone".to_string(), "El teléfono es requerido.".to_string());
+    } else if !trimmed_phone.starts_with('+') || !trimmed_phone[1..].chars().all(|c| c.is_ascii_digit()) {
+        field_errors.insert("phone".to_string(), "El formato del teléfono debe incluir el prefijo internacional (ej: +50312345678).".to_string());
+    } else if trimmed_phone.chars().count() < 8 || trimmed_phone.chars().count() > 17 {
+        field_errors.insert("phone".to_string(), "Longitud de número de teléfono inválida.".to_string());
+    }
+
+    // 4. Validar contraseña con criterios de seguridad
     let password_errors = validate_password(&payload.password);
     if !password_errors.is_empty() {
+        if let Some(err) = password_errors.get("password") {
+            field_errors.insert("password".to_string(), err.clone());
+        }
+    }
+
+    if !field_errors.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
             Json(ApiResponse {
                 success: false,
-                message: "La contraseña no cumple los criterios de seguridad.".to_string(),
-                field_errors: Some(password_errors),
+                message: "Datos de registro inválidos.".to_string(),
+                field_errors: Some(field_errors),
             }),
         );
     }
 
-    // 2. Hashear la contraseña con Argon2
+    // 5. Buscar si ya existe el correo o teléfono en la base de datos
+    let existing_users = sqlx::query_as::<_, (Uuid, String, String, String)>(
+        "SELECT id, email, telefono, estado::TEXT FROM users WHERE email = $1 OR telefono = $2"
+    )
+    .bind(trimmed_email)
+    .bind(trimmed_phone)
+    .fetch_all(&state.pool)
+    .await;
+
+    match existing_users {
+        Ok(users) => {
+            let mut conflict_errors = HashMap::new();
+            for (id, email, phone, estado) in users {
+                if estado == "PENDING" {
+                    // Si está PENDING, lo eliminamos para permitir el re-registro libremente
+                    if let Err(e) = sqlx::query("DELETE FROM users WHERE id = $1")
+                        .bind(id)
+                        .execute(&state.pool)
+                        .await
+                    {
+                        eprintln!("Error al eliminar usuario PENDING duplicado: {}", e);
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(ApiResponse {
+                                success: false,
+                                message: "Error interno al limpiar el registro anterior incompleto.".to_string(),
+                                field_errors: None,
+                            }),
+                        );
+                    }
+                } else {
+                    // Si está ACTIVE o SUSPENDED, sí bloquea la creación
+                    if email == trimmed_email {
+                        conflict_errors.insert("email".to_string(), "Este correo electrónico ya está registrado.".to_string());
+                    }
+                    if phone == trimmed_phone {
+                        conflict_errors.insert("phone".to_string(), "Este número de teléfono ya está registrado.".to_string());
+                    }
+                }
+            }
+            if !conflict_errors.is_empty() {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(ApiResponse {
+                        success: false,
+                        message: "No se pudo completar el registro por datos duplicados.".to_string(),
+                        field_errors: Some(conflict_errors),
+                    }),
+                );
+            }
+        }
+        Err(e) => {
+            eprintln!("Error al verificar usuarios existentes: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    success: false,
+                    message: "Error interno del servidor al validar credenciales existentes.".to_string(),
+                    field_errors: None,
+                }),
+            );
+        }
+    }
+
+    // 6. Hashear la contraseña con Argon2
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
 
@@ -130,13 +227,13 @@ pub async fn register_user(
         }
     };
 
-    // 3. Insertar en la base de datos (estado PENDING hasta verificación)
+    // 7. Insertar en la base de datos (estado PENDING hasta verificación)
     let insert_result = sqlx::query(
         "INSERT INTO users (name, email, telefono, password) VALUES ($1, $2, $3, $4)"
     )
-    .bind(&payload.name)
-    .bind(&payload.email)
-    .bind(&payload.phone)
+    .bind(trimmed_name)
+    .bind(trimmed_email)
+    .bind(trimmed_phone)
     .bind(&password_hash)
     .execute(&state.pool)
     .await;
@@ -152,21 +249,21 @@ pub async fn register_user(
         ),
         Err(e) => {
             let error_string = e.to_string();
-            let mut field_errors = HashMap::new();
+            let mut conflict_errors = HashMap::new();
 
             if error_string.contains("users_email_key") {
-                field_errors.insert("email".to_string(), "Este correo electrónico ya está registrado.".to_string());
+                conflict_errors.insert("email".to_string(), "Este correo electrónico ya está registrado.".to_string());
             } else if error_string.contains("users_telefono_key") {
-                field_errors.insert("phone".to_string(), "Este número de teléfono ya está registrado.".to_string());
+                conflict_errors.insert("phone".to_string(), "Este número de teléfono ya está registrado.".to_string());
             }
 
-            let status = if !field_errors.is_empty() {
+            let status = if !conflict_errors.is_empty() {
                 StatusCode::CONFLICT
             } else {
                 StatusCode::INTERNAL_SERVER_ERROR
             };
 
-            let message = if !field_errors.is_empty() {
+            let message = if !conflict_errors.is_empty() {
                 "No se pudo completar el registro por datos duplicados.".to_string()
             } else {
                 "Error interno del servidor al registrar el usuario.".to_string()
@@ -177,7 +274,7 @@ pub async fn register_user(
                 Json(ApiResponse {
                     success: false,
                     message,
-                    field_errors: if field_errors.is_empty() { None } else { Some(field_errors) },
+                    field_errors: if conflict_errors.is_empty() { None } else { Some(conflict_errors) },
                 }),
             )
         }

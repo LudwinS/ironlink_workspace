@@ -92,6 +92,7 @@ class IamRepository {
       final username = user['name'] as String? ?? 'User';
       final userEmail = user['email'] as String? ?? email;
       final role = user['role'] as String? ?? 'Miembro';
+      final userId = user['id'] as String? ?? '';
 
       // Guardar en SecureVault
       await SecureVault.saveAuthData(
@@ -100,6 +101,7 @@ class IamRepository {
         username: username,
         email: userEmail,
         role: role,
+        userId: userId,
         rememberMe: rememberMe,
       );
 
@@ -107,6 +109,7 @@ class IamRepository {
         'username': username,
         'email': userEmail,
         'role': role,
+        'userId': userId,
       };
     } on DioException catch (e) {
       final responseData = e.response?.data;

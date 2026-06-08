@@ -42,21 +42,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   void _submit() async {
-    print("DEBUG: LoginScreen - _submit() llamado");
     if (_formKey.currentState!.validate()) {
-      print("DEBUG: LoginScreen - Formulario validado con éxito. Llamando a authProvider.login...");
-      final success = await ref.read(authProvider.notifier).login(
+      await ref.read(authProvider.notifier).login(
             _emailController.text.trim(),
             _passwordController.text,
             rememberMe: _rememberMe,
           );
-      print("DEBUG: LoginScreen - authProvider.login completado. Éxito: $success, mounted: $mounted");
-
-      if (success && mounted) {
-        print("DEBUG: LoginScreen - Login exitoso, el RouterNotifier redirigirá automáticamente a /home");
-      }
-    } else {
-      print("DEBUG: LoginScreen - Formulario no superó la validación visual");
     }
   }
 
@@ -110,7 +101,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               height: 300,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: _mint.withOpacity(0.08),
+                color: _mint.withValues(alpha: 0.08),
               ),
               child: ClipOval(
                 child: BackdropFilter(
@@ -144,7 +135,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           border: Border.all(color: _border, width: 1.5),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.3),
+                              color: Colors.black.withValues(alpha: 0.3),
                               blurRadius: 30,
                               offset: const Offset(0, 15),
                             ),
@@ -236,7 +227,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                           _obscurePassword
                                               ? Icons.visibility_off_outlined
                                               : Icons.visibility_outlined,
-                                          color: _mint.withOpacity(0.7),
+                                          color: _mint.withValues(alpha: 0.7),
                                         ),
                                         onPressed: () => setState(
                                           () => _obscurePassword = !_obscurePassword,
@@ -388,8 +379,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: _errorRed.withOpacity(0.1),
-        border: Border.all(color: _errorRed.withOpacity(0.3)),
+        color: _errorRed.withValues(alpha: 0.1),
+        border: Border.all(color: _errorRed.withValues(alpha: 0.3)),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -482,10 +473,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     return InputDecoration(
       hintText: hint,
       hintStyle: const TextStyle(color: _slate500),
-      prefixIcon: Icon(icon, color: _mint.withOpacity(0.7)),
+      prefixIcon: Icon(icon, color: _mint.withValues(alpha: 0.7)),
       suffixIcon: suffix,
       filled: true,
-      fillColor: _navy950.withOpacity(0.6),
+      fillColor: _navy950.withValues(alpha: 0.6),
       contentPadding: const EdgeInsets.symmetric(vertical: 16),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
@@ -537,8 +528,8 @@ class _LeftHeroPanel extends StatelessWidget {
                 shape: BoxShape.circle,
                 gradient: RadialGradient(
                   colors: [
-                    _mint.withOpacity(0.12),
-                    _mint.withOpacity(0.0),
+                    _mint.withValues(alpha: 0.12),
+                    _mint.withValues(alpha: 0.0),
                   ],
                 ),
               ),
@@ -556,8 +547,8 @@ class _LeftHeroPanel extends StatelessWidget {
                 shape: BoxShape.circle,
                 gradient: RadialGradient(
                   colors: [
-                    _cyan.withOpacity(0.07),
-                    _cyan.withOpacity(0.0),
+                    _cyan.withValues(alpha: 0.07),
+                    _cyan.withValues(alpha: 0.0),
                   ],
                 ),
               ),
@@ -713,7 +704,7 @@ class _GridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = _border.withOpacity(0.15)
+      ..color = _border.withValues(alpha: 0.15)
       ..strokeWidth = 0.5;
 
     const spacing = 40.0;
