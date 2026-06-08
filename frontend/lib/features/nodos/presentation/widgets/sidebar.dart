@@ -52,10 +52,15 @@ class Sidebar extends ConsumerWidget {
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
             child: Row(
               children: [
-                const Icon(
-                  Icons.hub_rounded,
-                  color: _mint,
-                  size: 28,
+                Image.asset(
+                  'assets/logo.png',
+                  width: 28,
+                  height: 28,
+                  errorBuilder: (context, error, stackTrace) => const Icon(
+                    Icons.hub_rounded,
+                    color: _mint,
+                    size: 28,
+                  ),
                 ),
                 const SizedBox(width: 10),
                 const Text(
