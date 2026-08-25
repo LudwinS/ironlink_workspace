@@ -11,6 +11,7 @@ use argon2::{
 };
 
 use crate::auth::jwt::generate_access_token;
+use crate::auth::middleware::AuthUser;
 use crate::auth::verification::AppState;
 
 // ─── DTOs ────────────────────────────────────────────────────────────────
@@ -578,4 +579,274 @@ pub async fn change_user_role(
             )
         }
     }
+}
+
+// ─── Sprint 2: IRL-IAM-US-05 — Perfil de Usuario y Personalización ───────
+
+#[derive(Serialize)]
+pub struct UserProfileDto {
+    pub id: Uuid,
+    pub name: String,
+    pub email: String,
+    pub telefono: String,
+    pub rol: String,
+    pub estado: String,
+    pub bio: String,
+    pub avatar_color: String,
+    pub status_text: String,
+    pub avatar_url: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
+pub struct ProfileResponse {
+    pub success: bool,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<UserProfileDto>,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateProfileDto {
+    pub name: Option<String>,
+    pub telefono: Option<String>,
+    pub bio: Option<String>,
+    pub avatar_color: Option<String>,
+    pub status_text: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct ChangePasswordDto {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+// ─── GET /users/me ───────────────────────────────────────────────────────
+
+pub async fn get_user_profile(
+    State(state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
+) -> (StatusCode, Json<ProfileResponse>) {
+    let row = sqlx::query_as::<_, (Uuid, String, String, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, chrono::DateTime<chrono::Utc>)>(
+        "SELECT id, name, email, telefono, rol::TEXT, estado::TEXT, bio, avatar_color, status_text, avatar_url, created_at 
+         FROM users WHERE id = $1"
+    )
+    .bind(auth_user.user_id)
+    .fetch_optional(&state.pool)
+    .await;
+
+    match row {
+        Ok(Some((id, name, email, telefono, rol, estado, bio, color, status, url, created_at))) => {
+            (
+                StatusCode::OK,
+                Json(ProfileResponse {
+                    success: true,
+                    message: "Perfil obtenido exitosamente.".to_string(),
+                    profile: Some(UserProfileDto {
+                        id,
+                        name,
+                        email,
+                        telefono,
+                        rol,
+                        estado,
+                        bio: bio.unwrap_or_default(),
+                        avatar_color: color.unwrap_or_else(|| "#00E5FF".to_string()),
+                        status_text: status.unwrap_or_default(),
+                        avatar_url: url,
+                        created_at,
+                    }),
+                }),
+            )
+        }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(ProfileResponse {
+                success: false,
+                message: "Usuario no encontrado.".to_string(),
+                profile: None,
+            }),
+        ),
+        Err(e) => {
+            eprintln!("Error al obtener perfil de usuario: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ProfileResponse {
+                    success: false,
+                    message: "Error interno al obtener el perfil.".to_string(),
+                    profile: None,
+                }),
+            )
+        }
+    }
+}
+
+// ─── PUT /users/me ───────────────────────────────────────────────────────
+
+pub async fn update_user_profile(
+    State(state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
+    Json(payload): Json<UpdateProfileDto>,
+) -> (StatusCode, Json<ProfileResponse>) {
+    let result = sqlx::query(
+        "UPDATE users 
+         SET name = COALESCE($1, name),
+             telefono = COALESCE($2, telefono),
+             bio = COALESCE($3, bio),
+             avatar_color = COALESCE($4, avatar_color),
+             status_text = COALESCE($5, status_text),
+             avatar_url = COALESCE($6, avatar_url),
+             updated_at = NOW()
+         WHERE id = $7"
+    )
+    .bind(payload.name.as_deref().map(str::trim).filter(|s| !s.is_empty()))
+    .bind(payload.telefono.as_deref().map(str::trim).filter(|s| !s.is_empty()))
+    .bind(payload.bio.as_deref())
+    .bind(payload.avatar_color.as_deref().map(str::trim).filter(|s| !s.is_empty()))
+    .bind(payload.status_text.as_deref())
+    .bind(payload.avatar_url.as_deref())
+    .bind(auth_user.user_id)
+    .execute(&state.pool)
+    .await;
+
+    match result {
+        Ok(r) => {
+            if r.rows_affected() == 0 {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(ProfileResponse {
+                        success: false,
+                        message: "Usuario no encontrado.".to_string(),
+                        profile: None,
+                    }),
+                );
+            }
+
+            // Retornar perfil actualizado
+            get_user_profile(State(state), axum::Extension(auth_user)).await
+        }
+        Err(e) => {
+            eprintln!("Error al actualizar perfil de usuario: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ProfileResponse {
+                    success: false,
+                    message: "Error interno al actualizar el perfil.".to_string(),
+                    profile: None,
+                }),
+            )
+        }
+    }
+}
+
+// ─── PUT /users/me/password ──────────────────────────────────────────────
+
+pub async fn change_user_password(
+    State(state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
+    Json(payload): Json<ChangePasswordDto>,
+) -> (StatusCode, Json<ApiResponse>) {
+    // 1. Obtener hash actual
+    let current_hash = sqlx::query_scalar::<_, String>(
+        "SELECT password FROM users WHERE id = $1"
+    )
+    .bind(auth_user.user_id)
+    .fetch_optional(&state.pool)
+    .await;
+
+    let hash_str = match current_hash {
+        Ok(Some(h)) => h,
+        _ => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(ApiResponse {
+                    success: false,
+                    message: "Usuario no encontrado.".to_string(),
+                    field_errors: None,
+                }),
+            );
+        }
+    };
+
+    // 2. Verificar contraseña actual con Argon2
+    let parsed_hash = match PasswordHash::new(&hash_str) {
+        Ok(h) => h,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    success: false,
+                    message: "Error al procesar el hash de contraseña.".to_string(),
+                    field_errors: None,
+                }),
+            );
+        }
+    };
+
+    if Argon2::default().verify_password(payload.current_password.as_bytes(), &parsed_hash).is_err() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ApiResponse {
+                success: false,
+                message: "La contraseña actual no es correcta.".to_string(),
+                field_errors: None,
+            }),
+        );
+    }
+
+    // 3. Validar nueva contraseña
+    let field_errors = validate_password(&payload.new_password);
+    if !field_errors.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                success: false,
+                message: "La nueva contraseña no cumple con los requisitos de seguridad.".to_string(),
+                field_errors: Some(field_errors),
+            }),
+        );
+    }
+
+    // 4. Hashear nueva contraseña
+    let salt = SaltString::generate(&mut OsRng);
+    let new_hash = match Argon2::default().hash_password(payload.new_password.as_bytes(), &salt) {
+        Ok(h) => h.to_string(),
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    success: false,
+                    message: "Error al encriptar la nueva contraseña.".to_string(),
+                    field_errors: None,
+                }),
+            );
+        }
+    };
+
+    // 5. Guardar en DB
+    if let Err(e) = sqlx::query("UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2")
+        .bind(&new_hash)
+        .bind(auth_user.user_id)
+        .execute(&state.pool)
+        .await
+    {
+        eprintln!("Error al actualizar contraseña: {}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                success: false,
+                message: "Error interno al actualizar la contraseña.".to_string(),
+                field_errors: None,
+            }),
+        );
+    }
+
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            success: true,
+            message: "Contraseña actualizada exitosamente.".to_string(),
+            field_errors: None,
+        }),
+    )
 }

@@ -1,0 +1,579 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../providers/profile_provider.dart';
+
+const _navy950 = AppColors.navy950;
+const _navy900 = AppColors.navy900;
+const _border = AppColors.border;
+const _mint = AppColors.mint;
+const _cyan = AppColors.cyan;
+const _slate100 = AppColors.slate100;
+const _slate400 = AppColors.slate400;
+const _slate500 = AppColors.slate500;
+
+class ProfileDialog extends ConsumerStatefulWidget {
+  const ProfileDialog({super.key});
+
+  static Future<void> show(BuildContext context) {
+    return showDialog(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.7),
+      builder: (_) => const ProfileDialog(),
+    );
+  }
+
+  @override
+  ConsumerState<ProfileDialog> createState() => _ProfileDialogState();
+}
+
+class _ProfileDialogState extends ConsumerState<ProfileDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late TextEditingController _nameCtrl;
+  late TextEditingController _phoneCtrl;
+  late TextEditingController _bioCtrl;
+  late TextEditingController _statusCtrl;
+  String _selectedColor = '#00E5FF';
+  bool _initialized = false;
+
+  // Password change controllers
+  bool _showPasswordChange = false;
+  final _currentPassCtrl = TextEditingController();
+  final _newPassCtrl = TextEditingController();
+  final _confirmPassCtrl = TextEditingController();
+
+  final List<String> _avatarColors = [
+    '#00E5FF', // Cyan
+    '#00BFA5', // Mint
+    '#8B5CF6', // Purple
+    '#F59E0B', // Amber
+    '#EF4444', // Red
+    '#3B82F6', // Blue
+    '#10B981', // Emerald
+    '#EC4899', // Pink
+  ];
+
+  final List<String> _presetStatuses = [
+    '🟢 En línea',
+    '🟡 En reunión',
+    '🔴 Ocupado',
+    '📚 Estudiando',
+    '⚡ Desarrollando en IronLink',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl = TextEditingController();
+    _phoneCtrl = TextEditingController();
+    _bioCtrl = TextEditingController();
+    _statusCtrl = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _phoneCtrl.dispose();
+    _bioCtrl.dispose();
+    _statusCtrl.dispose();
+    _currentPassCtrl.dispose();
+    _newPassCtrl.dispose();
+    _confirmPassCtrl.dispose();
+    super.dispose();
+  }
+
+  void _populateData() {
+    final profile = ref.read(profileProvider).profile;
+    if (profile != null && !_initialized) {
+      _nameCtrl.text = profile.name;
+      _phoneCtrl.text = profile.telefono;
+      _bioCtrl.text = profile.bio;
+      _statusCtrl.text = profile.statusText;
+      _selectedColor = profile.avatarColor.isNotEmpty ? profile.avatarColor : '#00E5FF';
+      _initialized = true;
+    }
+  }
+
+  Color _parseColor(String hex) {
+    try {
+      final clean = hex.replaceAll('#', '');
+      return Color(int.parse('0xFF$clean'));
+    } catch (_) {
+      return const Color(0xFF00E5FF);
+    }
+  }
+
+  Future<void> _saveProfile() async {
+    if (!_formKey.currentState!.validate()) return;
+    
+    final success = await ref.read(profileProvider.notifier).updateProfile(
+      name: _nameCtrl.text.trim(),
+      telefono: _phoneCtrl.text.trim(),
+      bio: _bioCtrl.text.trim(),
+      avatarColor: _selectedColor,
+      statusText: _statusCtrl.text.trim(),
+    );
+
+    if (success && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ Perfil actualizado exitosamente'),
+          backgroundColor: Color(0xFF10B981),
+        ),
+      );
+      Navigator.of(context).pop();
+    }
+  }
+
+  Future<void> _changePassword() async {
+    if (_newPassCtrl.text != _confirmPassCtrl.text) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Las contraseñas nuevas no coinciden.'),
+          backgroundColor: Color(0xFFEF4444),
+        ),
+      );
+      return;
+    }
+
+    final success = await ref.read(profileProvider.notifier).changePassword(
+      currentPassword: _currentPassCtrl.text,
+      newPassword: _newPassCtrl.text,
+    );
+
+    if (success && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ Contraseña cambiada correctamente.'),
+          backgroundColor: Color(0xFF10B981),
+        ),
+      );
+      setState(() {
+        _showPasswordChange = false;
+        _currentPassCtrl.clear();
+        _newPassCtrl.clear();
+        _confirmPassCtrl.clear();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final profileState = ref.watch(profileProvider);
+    _populateData();
+    final profile = profileState.profile;
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      child: Container(
+        width: 520,
+        constraints: const BoxConstraints(maxHeight: 700),
+        decoration: BoxDecoration(
+          color: _navy900,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: _border),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.5),
+              blurRadius: 24,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            // Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 20, 20, 16),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: _mint.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.person_outline_rounded, color: _mint, size: 22),
+                  ),
+                  const SizedBox(width: 14),
+                  const Expanded(
+                    child: Text(
+                      'Mi Perfil y Personalización',
+                      style: TextStyle(
+                        color: _slate100,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded, color: _slate400, size: 20),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(color: _border, height: 1),
+
+            // Body
+            Expanded(
+              child: profileState.isLoading && profile == null
+                  ? const Center(child: CircularProgressIndicator(color: _mint))
+                  : SingleChildScrollView(
+                      padding: const EdgeInsets.all(24),
+                      child: Form(
+                        key: _formKey,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Avatar & Role preview
+                            Center(
+                              child: Column(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 36,
+                                    backgroundColor: _parseColor(_selectedColor),
+                                    child: Text(
+                                      (_nameCtrl.text.isNotEmpty
+                                              ? _nameCtrl.text[0]
+                                              : (profile?.name.isNotEmpty == true ? profile!.name[0] : 'U'))
+                                          .toUpperCase(),
+                                      style: const TextStyle(
+                                        color: _navy950,
+                                        fontSize: 28,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: _cyan.withValues(alpha: 0.15),
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: Text(
+                                          profile?.rol.toUpperCase() ?? 'MEMBER',
+                                          style: const TextStyle(
+                                            color: _cyan,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: const Text(
+                                          '● ACTIVO',
+                                          style: TextStyle(
+                                            color: Color(0xFF10B981),
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+
+                            // Color de Avatar
+                            const Text(
+                              'Color de Avatar',
+                              style: TextStyle(
+                                color: _slate400,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: _avatarColors.map((hex) {
+                                final isSelected = _selectedColor.toUpperCase() == hex.toUpperCase();
+                                return GestureDetector(
+                                  onTap: () {
+                                    setState(() {
+                                      _selectedColor = hex;
+                                    });
+                                  },
+                                  child: Container(
+                                    width: 32,
+                                    height: 32,
+                                    decoration: BoxDecoration(
+                                      color: _parseColor(hex),
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: isSelected ? Colors.white : Colors.transparent,
+                                        width: 2.5,
+                                      ),
+                                      boxShadow: isSelected
+                                          ? [
+                                              BoxShadow(
+                                                color: _parseColor(hex).withValues(alpha: 0.5),
+                                                blurRadius: 8,
+                                              )
+                                            ]
+                                          : null,
+                                    ),
+                                    child: isSelected
+                                        ? const Icon(Icons.check, color: _navy950, size: 18)
+                                        : null,
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                            const SizedBox(height: 18),
+
+                            // Estado de Presencia
+                            const Text(
+                              'Estado de Presencia',
+                              style: TextStyle(
+                                color: _slate400,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            TextFormField(
+                              controller: _statusCtrl,
+                              style: const TextStyle(color: _slate100, fontSize: 13),
+                              decoration: _inputDecoration(
+                                hint: '¿En qué estás trabajando?',
+                                prefixIcon: Icons.mood_rounded,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Wrap(
+                              spacing: 6,
+                              children: _presetStatuses.map((st) {
+                                return ActionChip(
+                                  backgroundColor: _navy950,
+                                  side: const BorderSide(color: _border),
+                                  label: Text(st, style: const TextStyle(color: _slate400, fontSize: 11)),
+                                  onPressed: () {
+                                    setState(() {
+                                      _statusCtrl.text = st;
+                                    });
+                                  },
+                                );
+                              }).toList(),
+                            ),
+                            const SizedBox(height: 18),
+
+                            // Nombre Completo
+                            const Text(
+                              'Nombre Completo',
+                              style: TextStyle(color: _slate400, fontSize: 12, fontWeight: FontWeight.w600),
+                            ),
+                            const SizedBox(height: 6),
+                            TextFormField(
+                              controller: _nameCtrl,
+                              style: const TextStyle(color: _slate100, fontSize: 13),
+                              decoration: _inputDecoration(
+                                hint: 'Tu nombre',
+                                prefixIcon: Icons.badge_outlined,
+                              ),
+                              validator: (v) => v == null || v.trim().isEmpty ? 'Ingresa tu nombre' : null,
+                            ),
+                            const SizedBox(height: 16),
+
+                            // Correo electrónico (Read only)
+                            const Text(
+                              'Correo Electrónico',
+                              style: TextStyle(color: _slate400, fontSize: 12, fontWeight: FontWeight.w600),
+                            ),
+                            const SizedBox(height: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                              decoration: BoxDecoration(
+                                color: _navy950,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: _border),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.email_outlined, color: _slate500, size: 18),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      profile?.email ?? '',
+                                      style: const TextStyle(color: _slate400, fontSize: 13),
+                                    ),
+                                  ),
+                                  const Icon(Icons.verified_rounded, color: Color(0xFF10B981), size: 16),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+
+                            // Teléfono
+                            const Text(
+                              'Teléfono',
+                              style: TextStyle(color: _slate400, fontSize: 12, fontWeight: FontWeight.w600),
+                            ),
+                            const SizedBox(height: 6),
+                            TextFormField(
+                              controller: _phoneCtrl,
+                              style: const TextStyle(color: _slate100, fontSize: 13),
+                              decoration: _inputDecoration(
+                                hint: '+503 12345678',
+                                prefixIcon: Icons.phone_outlined,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+
+                            // Biografía
+                            const Text(
+                              'Biografía / Acerca de mí',
+                              style: TextStyle(color: _slate400, fontSize: 12, fontWeight: FontWeight.w600),
+                            ),
+                            const SizedBox(height: 6),
+                            TextFormField(
+                              controller: _bioCtrl,
+                              maxLines: 3,
+                              style: const TextStyle(color: _slate100, fontSize: 13),
+                              decoration: _inputDecoration(
+                                hint: 'Escribe una breve descripción sobre ti...',
+                                prefixIcon: Icons.info_outline_rounded,
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+
+                            // Sección de Contraseña
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  'Seguridad de la Cuenta',
+                                  style: TextStyle(color: _slate100, fontSize: 14, fontWeight: FontWeight.w700),
+                                ),
+                                TextButton.icon(
+                                  icon: Icon(
+                                    _showPasswordChange ? Icons.expand_less : Icons.expand_more,
+                                    color: _cyan,
+                                    size: 18,
+                                  ),
+                                  label: Text(
+                                    _showPasswordChange ? 'Ocultar' : 'Cambiar contraseña',
+                                    style: const TextStyle(color: _cyan, fontSize: 12),
+                                  ),
+                                  onPressed: () {
+                                    setState(() {
+                                      _showPasswordChange = !_showPasswordChange;
+                                    });
+                                  },
+                                ),
+                              ],
+                            ),
+                            if (_showPasswordChange) ...[
+                              const SizedBox(height: 10),
+                              TextFormField(
+                                controller: _currentPassCtrl,
+                                obscureText: true,
+                                style: const TextStyle(color: _slate100, fontSize: 13),
+                                decoration: _inputDecoration(
+                                  hint: 'Contraseña actual',
+                                  prefixIcon: Icons.lock_outline_rounded,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              TextFormField(
+                                controller: _newPassCtrl,
+                                obscureText: true,
+                                style: const TextStyle(color: _slate100, fontSize: 13),
+                                decoration: _inputDecoration(
+                                  hint: 'Nueva contraseña (mín 8 chars)',
+                                  prefixIcon: Icons.lock_rounded,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              TextFormField(
+                                controller: _confirmPassCtrl,
+                                obscureText: true,
+                                style: const TextStyle(color: _slate100, fontSize: 13),
+                                decoration: _inputDecoration(
+                                  hint: 'Confirmar nueva contraseña',
+                                  prefixIcon: Icons.lock_rounded,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: _cyan,
+                                  foregroundColor: _navy950,
+                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                ),
+                                onPressed: _changePassword,
+                                child: const Center(
+                                  child: Text('Actualizar Contraseña', style: TextStyle(fontWeight: FontWeight.w700)),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+            ),
+
+            const Divider(color: _border, height: 1),
+
+            // Footer
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Cancelar', style: TextStyle(color: _slate400)),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _mint,
+                      foregroundColor: _navy950,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: profileState.isLoading ? null : _saveProfile,
+                    child: profileState.isLoading
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: _navy950))
+                        : const Text('Guardar cambios', style: TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  InputDecoration _inputDecoration({required String hint, required IconData prefixIcon}) {
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: const TextStyle(color: _slate500, fontSize: 13),
+      prefixIcon: Icon(prefixIcon, color: _slate400, size: 18),
+      filled: true,
+      fillColor: _navy950,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: _border)),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: _border)),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: _mint)),
+    );
+  }
+}

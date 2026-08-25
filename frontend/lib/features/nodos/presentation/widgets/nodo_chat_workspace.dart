@@ -4,10 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../data/nodos_repository.dart';
+import '../../data/subgrupos_repository.dart';
 import '../../providers/nodos_provider.dart';
 import '../../providers/chat_provider.dart';
+import '../../providers/subgrupos_provider.dart';
 import '../../../iam/providers/auth_provider.dart';
 import 'nodo_details_dialog.dart';
+import 'subgrupos_view.dart';
+import 'reuniones_view.dart';
 
 const _navy950 = AppColors.navy950;
 const _navy900 = AppColors.navy900;
@@ -33,8 +37,10 @@ class _NodoChatWorkspaceState extends ConsumerState<NodoChatWorkspace> {
   final _msgCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   List<NodoMiembro> _miembros = [];
+  List<SubgrupoMiembro> _subMiembros = [];
   Timer? _membersTimer;
   bool _showMembersSidebar = true;
+  int _currentTab = 0; // 0: Chat, 1: Subgrupos, 2: Reuniones
 
   @override
   void initState() {
@@ -61,6 +67,22 @@ class _NodoChatWorkspaceState extends ConsumerState<NodoChatWorkspace> {
         setState(() {
           _miembros = list;
         });
+      }
+
+      final currentSub = ref.read(selectedSubgrupoProvider);
+      if (currentSub != null) {
+        try {
+          final subRepo = ref.read(subgruposRepositoryProvider);
+          final subList = await subRepo.fetchSubgrupoMiembros(
+            nodoId: widget.nodo.id,
+            subgrupoId: currentSub.id,
+          );
+          if (mounted) {
+            setState(() {
+              _subMiembros = subList;
+            });
+          }
+        } catch (_) {}
       }
     } catch (_) {
       // Silencioso
@@ -145,9 +167,49 @@ class _NodoChatWorkspaceState extends ConsumerState<NodoChatWorkspace> {
     );
   }
 
+  Widget _workspaceTabBtn({
+    required IconData icon,
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+    Color activeColor = _mint,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected ? activeColor.withValues(alpha: 0.15) : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 15,
+              color: isSelected ? activeColor : _slate400,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: isSelected ? activeColor : _slate400,
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final chatState = ref.watch(chatMessagesProvider);
+    final selectedSubgrupo = ref.watch(selectedSubgrupoProvider);
     final width = MediaQuery.of(context).size.width;
     final isMobile = width < _mobileBreakpoint;
     final currentUserEmail = ref.watch(userEmailProvider);
@@ -155,6 +217,13 @@ class _NodoChatWorkspaceState extends ConsumerState<NodoChatWorkspace> {
     final currentUserNodeRole = widget.nodo.rol?.toUpperCase() ?? 'MEMBER';
     final isGlobalAdmin = globalRole.toUpperCase() == 'ADMIN';
     final isOwnerOrGlobalAdmin = currentUserNodeRole == 'OWNER' || isGlobalAdmin;
+
+    final isSubgrupoLocked = selectedSubgrupo != null &&
+        selectedSubgrupo.esPrivado &&
+        !selectedSubgrupo.isMember &&
+        !isOwnerOrGlobalAdmin;
+
+    final themeColor = selectedSubgrupo != null ? _cyan : _mint;
 
     // Auto scroll al cargar mensajes o recibir nuevos
     ref.listen<ChatMessagesState>(chatMessagesProvider, (prev, next) {
@@ -173,7 +242,7 @@ class _NodoChatWorkspaceState extends ConsumerState<NodoChatWorkspace> {
               children: [
                 // Cabecera del chat
                 Container(
-                  height: 56,
+                  height: 60,
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   decoration: const BoxDecoration(
                     color: _navy900,
@@ -181,41 +250,145 @@ class _NodoChatWorkspaceState extends ConsumerState<NodoChatWorkspace> {
                   ),
                   child: Row(
                     children: [
-                      const Text(
-                        '#',
-                        style: TextStyle(
-                          color: _slate500,
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
+                      if (selectedSubgrupo != null) ...[
+                        IconButton(
+                          icon: const Icon(Icons.arrow_back_rounded, color: _cyan, size: 20),
+                          tooltip: 'Volver al Chat General',
+                          onPressed: () {
+                            ref.read(selectedSubgrupoProvider.notifier).state = null;
+                            setState(() => _currentTab = 0);
+                          },
                         ),
-                      ),
-                      const SizedBox(width: 8),
+                        const SizedBox(width: 4),
+                        Icon(
+                          selectedSubgrupo.esPrivado ? Icons.lock_rounded : Icons.groups_rounded,
+                          color: _cyan,
+                          size: 22,
+                        ),
+                      ] else ...[
+                        const Text(
+                          '#',
+                          style: TextStyle(
+                            color: _slate500,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(width: 10),
                       Expanded(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    selectedSubgrupo != null
+                                        ? selectedSubgrupo.nombre
+                                        : widget.nodo.nombre,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: _slate100,
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                if (selectedSubgrupo != null) ...[
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: (selectedSubgrupo.esPrivado ? _cyan : _mint).withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      selectedSubgrupo.esPrivado ? 'Subgrupo Privado' : 'Subgrupo Público',
+                                      style: TextStyle(
+                                        color: selectedSubgrupo.esPrivado ? _cyan : _mint,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            const SizedBox(height: 2),
                             Text(
-                              widget.nodo.nombre,
+                              selectedSubgrupo != null
+                                  ? (selectedSubgrupo.descripcion?.isNotEmpty == true
+                                      ? selectedSubgrupo.descripcion!
+                                      : '${selectedSubgrupo.miembrosCount} miembros en este subgrupo')
+                                  : (widget.nodo.descripcion?.isNotEmpty == true
+                                      ? widget.nodo.descripcion!
+                                      : 'Canal general del nodo'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                color: _slate100,
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
+                                color: _slate500,
+                                fontSize: 11,
                               ),
                             ),
-                            if (widget.nodo.descripcion != null && widget.nodo.descripcion!.isNotEmpty)
-                              Text(
-                                widget.nodo.descripcion!,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: _slate500,
-                                  fontSize: 11,
-                                ),
-                              ),
                           ],
                         ),
                       ),
+
+                      // Tabs de selección
+                      Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: BoxDecoration(
+                          color: _navy950,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: _border),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Botón Chat General
+                            _workspaceTabBtn(
+                              icon: Icons.chat_bubble_outline_rounded,
+                              label: 'Chat General',
+                              isSelected: _currentTab == 0 && selectedSubgrupo == null,
+                              activeColor: _mint,
+                              onTap: () {
+                                ref.read(selectedSubgrupoProvider.notifier).state = null;
+                                setState(() => _currentTab = 0);
+                              },
+                            ),
+                            // Si hay subgrupo activo, mostrar pestaña dedicada
+                            if (selectedSubgrupo != null) ...[
+                              const SizedBox(width: 4),
+                              _workspaceTabBtn(
+                                icon: selectedSubgrupo.esPrivado ? Icons.lock_outline_rounded : Icons.forum_outlined,
+                                label: '#${selectedSubgrupo.nombre}',
+                                isSelected: _currentTab == 0,
+                                activeColor: _cyan,
+                                onTap: () => setState(() => _currentTab = 0),
+                              ),
+                            ],
+                            const SizedBox(width: 4),
+                            _workspaceTabBtn(
+                              icon: Icons.groups_rounded,
+                              label: 'Subgrupos',
+                              isSelected: _currentTab == 1,
+                              activeColor: _cyan,
+                              onTap: () => setState(() => _currentTab = 1),
+                            ),
+                            const SizedBox(width: 4),
+                            _workspaceTabBtn(
+                              icon: Icons.calendar_today_rounded,
+                              label: 'Reuniones',
+                              isSelected: _currentTab == 2,
+                              activeColor: _mint,
+                              onTap: () => setState(() => _currentTab = 2),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
                       IconButton(
                         icon: const Icon(Icons.settings_rounded, color: _slate400, size: 20),
                         tooltip: 'Configuración del nodo',
@@ -229,7 +402,7 @@ class _NodoChatWorkspaceState extends ConsumerState<NodoChatWorkspace> {
                       IconButton(
                         icon: Icon(
                           _showMembersSidebar ? Icons.group_rounded : Icons.group_outlined,
-                          color: _showMembersSidebar ? _mint : _slate400,
+                          color: _showMembersSidebar ? themeColor : _slate400,
                           size: 20,
                         ),
                         tooltip: 'Mostrar/Ocultar miembros',
@@ -243,89 +416,242 @@ class _NodoChatWorkspaceState extends ConsumerState<NodoChatWorkspace> {
                   ),
                 ),
 
-                // Lista de Mensajes
-                Expanded(
-                  child: chatState.loading
-                      ? const Center(child: CircularProgressIndicator(color: _mint))
-                      : chatState.mensajes.isEmpty
-                          ? Center(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.chat_bubble_outline_rounded, size: 48, color: _slate500.withValues(alpha: 0.5)),
-                                  const SizedBox(height: 12),
-                                  const Text(
-                                    '¡Aquí comienza la conversación!',
-                                    style: TextStyle(color: _slate400, fontSize: 15, fontWeight: FontWeight.w600),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  const Text(
-                                    'Envía un mensaje para saludar a todos.',
-                                    style: TextStyle(color: _slate600, fontSize: 12),
-                                  ),
-                                ],
+                // Cuerpo condicional según Tab seleccionado
+                if (_currentTab == 1)
+                  Expanded(
+                    child: SubgruposView(
+                      nodoId: widget.nodo.id,
+                      onOpenChat: (sub) {
+                        ref.read(selectedSubgrupoProvider.notifier).state = sub;
+                        setState(() => _currentTab = 0);
+                        _fetchMiembros();
+                      },
+                    ),
+                  )
+                else if (_currentTab == 2)
+                  Expanded(child: ReunionesView(nodoId: widget.nodo.id))
+                else if (isSubgrupoLocked) ...[
+                  // Pantalla de bloqueo si el subgrupo es privado y no es miembro
+                  Expanded(
+                    child: Center(
+                      child: Container(
+                        constraints: const BoxConstraints(maxWidth: 420),
+                        margin: const EdgeInsets.all(24),
+                        padding: const EdgeInsets.all(32),
+                        decoration: BoxDecoration(
+                          color: _navy900,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: _cyan.withValues(alpha: 0.3)),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.3),
+                              blurRadius: 16,
+                              offset: const Offset(0, 6),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(18),
+                              decoration: BoxDecoration(
+                                color: _cyan.withValues(alpha: 0.15),
+                                shape: BoxShape.circle,
                               ),
-                            )
-                          : ListView.builder(
-                              controller: _scrollCtrl,
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              itemCount: chatState.mensajes.length,
-                              itemBuilder: (context, i) {
-                                final msg = chatState.mensajes[i];
-                                final isSelf = msg.userId == ref.watch(authProvider).userId;
-                                return ChatMessageRow(mensaje: msg, isSelf: isSelf);
+                              child: const Icon(Icons.lock_person_rounded, color: _cyan, size: 48),
+                            ),
+                            const SizedBox(height: 20),
+                            Text(
+                              'Subgrupo Privado: ${selectedSubgrupo.nombre}',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: _slate100,
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              selectedSubgrupo.descripcion?.isNotEmpty == true
+                                  ? selectedSubgrupo.descripcion!
+                                  : 'Este subgrupo es privado. Para poder ver los mensajes y participar en las conversaciones, debes unirte al equipo.',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(color: _slate400, fontSize: 13, height: 1.4),
+                            ),
+                            const SizedBox(height: 24),
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: _cyan,
+                                  foregroundColor: _navy950,
+                                  padding: const EdgeInsets.symmetric(vertical: 14),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                ),
+                                icon: const Icon(Icons.login_rounded, size: 18),
+                                label: const Text(
+                                  'Unirse a este subgrupo',
+                                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                                ),
+                                onPressed: () async {
+                                  await ref.read(subgruposProvider(widget.nodo.id).notifier).toggleJoin(selectedSubgrupo);
+                                  ref.read(selectedSubgrupoProvider.notifier).state = selectedSubgrupo.copyWith(
+                                    isMember: true,
+                                    miembrosCount: selectedSubgrupo.miembrosCount + 1,
+                                  );
+                                  _fetchMiembros();
+                                  _showSuccessSnack('¡Te has unido al subgrupo exitosamente!');
+                                },
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            TextButton.icon(
+                              style: TextButton.styleFrom(foregroundColor: _slate400),
+                              icon: const Icon(Icons.arrow_back, size: 16),
+                              label: const Text('Volver al chat general'),
+                              onPressed: () {
+                                ref.read(selectedSubgrupoProvider.notifier).state = null;
                               },
                             ),
-                ),
-
-                // Entrada de texto inferior
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: const BoxDecoration(
-                    color: _navy900,
-                    border: Border(top: BorderSide(color: _border, width: 0.5)),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: _msgCtrl,
-                          style: const TextStyle(color: _slate100, fontSize: 14),
-                          cursorColor: _mint,
-                          onFieldSubmitted: (_) => _sendMessage(),
-                          decoration: InputDecoration(
-                            hintText: 'Enviar mensaje a #${widget.nodo.nombre}',
-                            hintStyle: TextStyle(color: _slate500.withValues(alpha: 0.7)),
-                            filled: true,
-                            fillColor: _navy950,
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(24),
-                              borderSide: const BorderSide(color: _border),
+                ] else ...[
+                  // Banner informativo de Subgrupo Activo
+                  if (selectedSubgrupo != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: _cyan.withValues(alpha: 0.08),
+                        border: const Border(bottom: BorderSide(color: _border, width: 0.5)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.info_outline_rounded, color: _cyan, size: 16),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Estás en el canal de subgrupo #${selectedSubgrupo.nombre}. Los mensajes enviados aquí solo son visibles para los integrantes del subgrupo.',
+                              style: const TextStyle(color: _cyan, fontSize: 12),
                             ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(24),
-                              borderSide: const BorderSide(color: _border),
+                          ),
+                          TextButton(
+                            style: TextButton.styleFrom(
+                              foregroundColor: _slate400,
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(24),
-                              borderSide: const BorderSide(color: _mint, width: 1),
+                            onPressed: () {
+                              ref.read(selectedSubgrupoProvider.notifier).state = null;
+                            },
+                            child: const Text('Ir al General', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  // Lista de Mensajes
+                  Expanded(
+                    child: chatState.loading
+                        ? Center(child: CircularProgressIndicator(color: themeColor))
+                        : chatState.mensajes.isEmpty
+                            ? Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      selectedSubgrupo != null ? Icons.groups_rounded : Icons.chat_bubble_outline_rounded,
+                                      size: 48,
+                                      color: _slate500.withValues(alpha: 0.5),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      selectedSubgrupo != null
+                                          ? '¡Bienvenido al subgrupo #${selectedSubgrupo.nombre}!'
+                                          : '¡Aquí comienza la conversación!',
+                                      style: const TextStyle(color: _slate400, fontSize: 15, fontWeight: FontWeight.w600),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      selectedSubgrupo != null
+                                          ? 'Comienza a compartir ideas y colaborar con tu equipo en este subgrupo.'
+                                          : 'Envía un mensaje para saludar a todos.',
+                                      style: const TextStyle(color: _slate600, fontSize: 12),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : ListView.builder(
+                                controller: _scrollCtrl,
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                itemCount: chatState.mensajes.length,
+                                itemBuilder: (context, i) {
+                                  final msg = chatState.mensajes[i];
+                                  final isSelf = msg.userId == ref.watch(authProvider).userId;
+                                  return ChatMessageRow(
+                                    mensaje: msg,
+                                    isSelf: isSelf,
+                                    accentColor: themeColor,
+                                  );
+                                },
+                              ),
+                  ),
+
+                  // Entrada de texto inferior
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: const BoxDecoration(
+                      color: _navy900,
+                      border: Border(top: BorderSide(color: _border, width: 0.5)),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _msgCtrl,
+                            style: const TextStyle(color: _slate100, fontSize: 14),
+                            cursorColor: themeColor,
+                            onFieldSubmitted: (_) => _sendMessage(),
+                            decoration: InputDecoration(
+                              hintText: selectedSubgrupo != null
+                                  ? 'Enviar mensaje a #${selectedSubgrupo.nombre}'
+                                  : 'Enviar mensaje a #${widget.nodo.nombre}',
+                              hintStyle: TextStyle(color: _slate500.withValues(alpha: 0.7)),
+                              filled: true,
+                              fillColor: _navy950,
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(24),
+                                borderSide: const BorderSide(color: _border),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(24),
+                                borderSide: const BorderSide(color: _border),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(24),
+                                borderSide: BorderSide(color: themeColor, width: 1),
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      CircleAvatar(
-                        backgroundColor: _mint,
-                        radius: 20,
-                        child: IconButton(
-                          icon: const Icon(Icons.send_rounded, color: _navy950, size: 18),
-                          onPressed: _sendMessage,
+                        const SizedBox(width: 8),
+                        CircleAvatar(
+                          backgroundColor: themeColor,
+                          radius: 20,
+                          child: IconButton(
+                            icon: const Icon(Icons.send_rounded, color: _navy950, size: 18),
+                            onPressed: _sendMessage,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
           ),
@@ -345,7 +671,9 @@ class _NodoChatWorkspaceState extends ConsumerState<NodoChatWorkspace> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                   child: Text(
-                    'INTEGRANTES (${_miembros.length})',
+                    selectedSubgrupo != null
+                        ? 'MIEMBROS SUBGRUPO (${_subMiembros.isNotEmpty ? _subMiembros.length : selectedSubgrupo.miembrosCount})'
+                        : 'INTEGRANTES (${_miembros.length})',
                     style: const TextStyle(
                       color: _slate500,
                       fontSize: 10,
@@ -355,34 +683,44 @@ class _NodoChatWorkspaceState extends ConsumerState<NodoChatWorkspace> {
                   ),
                 ),
                 Expanded(
-                  child: _miembros.isEmpty
-                      ? const Center(child: CircularProgressIndicator(color: _mint))
-                      : ListView(
+                  child: selectedSubgrupo != null && _subMiembros.isNotEmpty
+                      ? ListView.builder(
                           padding: const EdgeInsets.symmetric(vertical: 4),
-                          children: [
-                            // Propietarios
-                            if (_miembros.any((m) => m.rol.toUpperCase() == 'OWNER')) ...[
-                              _categoryHeader('PROPIETARIO'),
-                              ..._miembros
-                                  .where((m) => m.rol.toUpperCase() == 'OWNER')
-                                  .map((m) => _buildMemberRow(m, currentUserEmail, isGlobalAdmin, currentUserNodeRole, isOwnerOrGlobalAdmin)),
-                            ],
-                            // Administradores
-                            if (_miembros.any((m) => m.rol.toUpperCase() == 'ADMIN')) ...[
-                              _categoryHeader('ADMINISTRADORES'),
-                              ..._miembros
-                                  .where((m) => m.rol.toUpperCase() == 'ADMIN')
-                                  .map((m) => _buildMemberRow(m, currentUserEmail, isGlobalAdmin, currentUserNodeRole, isOwnerOrGlobalAdmin)),
-                            ],
-                            // Miembros normales
-                            if (_miembros.any((m) => m.rol.toUpperCase() == 'MEMBER')) ...[
-                              _categoryHeader('MIEMBROS'),
-                              ..._miembros
-                                  .where((m) => m.rol.toUpperCase() == 'MEMBER')
-                                  .map((m) => _buildMemberRow(m, currentUserEmail, isGlobalAdmin, currentUserNodeRole, isOwnerOrGlobalAdmin)),
-                            ],
-                          ],
-                        ),
+                          itemCount: _subMiembros.length,
+                          itemBuilder: (context, idx) {
+                            final m = _subMiembros[idx];
+                            final isSelf = m.email == currentUserEmail;
+                            return SubgrupoMemberSidebarRow(member: m, isSelf: isSelf);
+                          },
+                        )
+                      : _miembros.isEmpty
+                          ? Center(child: CircularProgressIndicator(color: themeColor))
+                          : ListView(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              children: [
+                                // Propietarios
+                                if (_miembros.any((m) => m.rol.toUpperCase() == 'OWNER')) ...[
+                                  _categoryHeader('PROPIETARIO'),
+                                  ..._miembros
+                                      .where((m) => m.rol.toUpperCase() == 'OWNER')
+                                      .map((m) => _buildMemberRow(m, currentUserEmail, isGlobalAdmin, currentUserNodeRole, isOwnerOrGlobalAdmin)),
+                                ],
+                                // Administradores
+                                if (_miembros.any((m) => m.rol.toUpperCase() == 'ADMIN')) ...[
+                                  _categoryHeader('ADMINISTRADORES'),
+                                  ..._miembros
+                                      .where((m) => m.rol.toUpperCase() == 'ADMIN')
+                                      .map((m) => _buildMemberRow(m, currentUserEmail, isGlobalAdmin, currentUserNodeRole, isOwnerOrGlobalAdmin)),
+                                ],
+                                // Miembros normales
+                                if (_miembros.any((m) => m.rol.toUpperCase() == 'MEMBER')) ...[
+                                  _categoryHeader('MIEMBROS'),
+                                  ..._miembros
+                                      .where((m) => m.rol.toUpperCase() == 'MEMBER')
+                                      .map((m) => _buildMemberRow(m, currentUserEmail, isGlobalAdmin, currentUserNodeRole, isOwnerOrGlobalAdmin)),
+                                ],
+                              ],
+                            ),
                 ),
               ],
             ),
@@ -430,16 +768,92 @@ class _NodoChatWorkspaceState extends ConsumerState<NodoChatWorkspace> {
   }
 }
 
+// ── Fila del Integrante del Subgrupo en el Panel Lateral ────────────────────
+
+class SubgrupoMemberSidebarRow extends StatelessWidget {
+  final SubgrupoMiembro member;
+  final bool isSelf;
+
+  const SubgrupoMemberSidebarRow({
+    super.key,
+    required this.member,
+    required this.isSelf,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: isSelf
+                    ? const LinearGradient(colors: [_cyan, _mint])
+                    : const LinearGradient(colors: [_slate500, _slate600]),
+              ),
+              child: Center(
+                child: Text(
+                  member.name.isNotEmpty ? member.name[0].toUpperCase() : 'U',
+                  style: TextStyle(
+                    color: isSelf ? _navy950 : _slate100,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    isSelf ? '${member.name} (Tú)' : member.name,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isSelf ? _cyan : _slate100,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const Text(
+                    'Miembro del subgrupo',
+                    style: TextStyle(
+                      color: _slate500,
+                      fontSize: 10,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // ── Fila de Mensaje del Chat ────────────────────────────────────────────────
 
 class ChatMessageRow extends StatelessWidget {
   final Mensaje mensaje;
   final bool isSelf;
+  final Color accentColor;
 
   const ChatMessageRow({
     super.key,
     required this.mensaje,
     required this.isSelf,
+    this.accentColor = _mint,
   });
 
   @override
@@ -458,8 +872,8 @@ class ChatMessageRow extends StatelessWidget {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               gradient: isSelf
-                  ? const LinearGradient(
-                      colors: [_mint, _cyan],
+                  ? LinearGradient(
+                      colors: [accentColor, _cyan],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                     )
@@ -492,7 +906,7 @@ class ChatMessageRow extends StatelessWidget {
                     Text(
                       mensaje.userName,
                       style: TextStyle(
-                        color: isSelf ? _mint : _slate100,
+                        color: isSelf ? accentColor : _slate100,
                         fontWeight: FontWeight.bold,
                         fontSize: 14,
                       ),
@@ -683,3 +1097,4 @@ class MemberSidebarRow extends StatelessWidget {
     );
   }
 }
+

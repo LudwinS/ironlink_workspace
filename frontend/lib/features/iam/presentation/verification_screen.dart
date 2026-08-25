@@ -38,6 +38,9 @@ class VerificationScreen extends ConsumerStatefulWidget {
 }
 
 class _VerificationScreenState extends ConsumerState<VerificationScreen> {
+  // Email controller for fallback / direct entry
+  late final TextEditingController _emailInputController;
+
   // OTP controllers & focus nodes
   late final List<TextEditingController> _otpControllers;
   late final List<FocusNode> _otpFocusNodes;
@@ -53,6 +56,7 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
   @override
   void initState() {
     super.initState();
+    _emailInputController = TextEditingController(text: widget.email);
     _otpControllers = List.generate(6, (_) => TextEditingController());
     _otpFocusNodes = List.generate(6, (_) => FocusNode());
   }
@@ -60,6 +64,7 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
   @override
   void dispose() {
     _countdownTimer?.cancel();
+    _emailInputController.dispose();
     for (final c in _otpControllers) {
       c.dispose();
     }
@@ -68,6 +73,10 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
     }
     super.dispose();
   }
+
+  String get _currentEmail => _emailInputController.text.trim().isNotEmpty
+      ? _emailInputController.text.trim()
+      : widget.email.trim();
 
   void _startCountdown() {
     _secondsRemaining = 60;
@@ -82,7 +91,11 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
   }
 
   void _handleResend() {
-    ref.read(authProvider.notifier).resendVerification(widget.email);
+    if (_currentEmail.isEmpty) return;
+    ref.read(authProvider.notifier).requestVerification(
+          _currentEmail,
+          _phase == _VerificationPhase.linkWaiting ? 'link' : 'code',
+        );
     _startCountdown();
   }
 
@@ -108,8 +121,9 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
 
   /// Selects a verification method and transitions to the appropriate phase.
   Future<void> _selectMethod(String method) async {
+    if (_currentEmail.isEmpty) return;
     setState(() => _requestingMethod = true);
-    final success = await ref.read(authProvider.notifier).requestVerification(widget.email, method);
+    final success = await ref.read(authProvider.notifier).requestVerification(_currentEmail, method);
     if (!mounted) return;
     setState(() {
       _requestingMethod = false;
@@ -126,7 +140,8 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
 
   /// Submits the OTP code for verification.
   Future<void> _submitOtpCode() async {
-    final success = await ref.read(authProvider.notifier).verifyEmail(widget.email, _otpCode);
+    if (_currentEmail.isEmpty) return;
+    final success = await ref.read(authProvider.notifier).verifyEmail(_currentEmail, _otpCode);
     if (!mounted) return;
     if (success) {
       context.go('/verification-success');
@@ -135,9 +150,8 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
 
   /// Manual check after link verification (user says "Ya verifiqué").
   Future<void> _checkLinkVerification() async {
-    // Re-request verification status by trying to verify with empty code
-    // The backend should return user data if already verified via link
-    final success = await ref.read(authProvider.notifier).verifyEmail(widget.email, '');
+    if (_currentEmail.isEmpty) return;
+    final success = await ref.read(authProvider.notifier).verifyEmail(_currentEmail, '');
     if (!mounted) return;
     if (success) {
       context.go('/verification-success');
@@ -449,39 +463,87 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
   // PHASE 1: METHOD SELECTION
   // ══════════════════════════════════════════════════════════════════
   Widget _buildMethodSelection(AuthState authState) {
-    final maskedEmail = _maskEmail(widget.email);
+    final hasEmail = _currentEmail.isNotEmpty;
+    final maskedEmail = _maskEmail(_currentEmail);
 
     return Column(
       children: [
-        // ── Subtitle ──
-        RichText(
-          textAlign: TextAlign.center,
-          text: TextSpan(
-            style: const TextStyle(
+        if (!hasEmail) ...[
+          const Text(
+            'Ingresa tu correo electrónico registrado para solicitar el código o enlace de activación:',
+            textAlign: TextAlign.center,
+            style: TextStyle(
               color: _slate400,
-              fontSize: 14,
+              fontSize: 13.5,
               height: 1.5,
             ),
-            children: [
-              const TextSpan(text: 'Elige cómo deseas verificar tu cuenta '),
-              TextSpan(
-                text: maskedEmail,
-                style: const TextStyle(
-                  color: _mint,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
           ),
-        ),
-        const SizedBox(height: 28),
+          const SizedBox(height: 16),
+          TextFormField(
+            controller: _emailInputController,
+            style: const TextStyle(color: Colors.white),
+            keyboardType: TextInputType.emailAddress,
+            decoration: InputDecoration(
+              hintText: 'correo@organizacion.com',
+              hintStyle: const TextStyle(color: _slate500),
+              prefixIcon: const Icon(Icons.email_outlined, color: _mint),
+              filled: true,
+              fillColor: _navy950,
+              contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _border)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _border)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _mint, width: 1.5)),
+            ),
+            onChanged: (val) => setState(() {}),
+          ),
+          const SizedBox(height: 20),
+        ] else ...[
+          // Subtitle with editable email
+          RichText(
+            textAlign: TextAlign.center,
+            text: TextSpan(
+              style: const TextStyle(
+                color: _slate400,
+                fontSize: 14,
+                height: 1.5,
+              ),
+              children: [
+                const TextSpan(text: 'Elige cómo deseas verificar tu cuenta '),
+                TextSpan(
+                  text: maskedEmail,
+                  style: const TextStyle(
+                    color: _mint,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                _emailInputController.clear();
+              });
+            },
+            child: const Text(
+              'Cambiar correo',
+              style: TextStyle(
+                color: _cyan,
+                fontSize: 12,
+                decoration: TextDecoration.underline,
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+        ],
 
         // ── Code option card ──
         _buildMethodCard(
           icon: Icons.pin_outlined,
           title: 'Código de verificación',
-          subtitle: 'Recibe un código de 6 dígitos en tu correo electrónico',
-          onTap: _requestingMethod ? null : () => _selectMethod('code'),
+          subtitle: 'Recibe un código de 6 dígitos con 15 minutos de vigencia',
+          onTap: (_requestingMethod || _currentEmail.isEmpty) ? null : () => _selectMethod('code'),
         ),
         const SizedBox(height: 12),
 
@@ -489,8 +551,8 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
         _buildMethodCard(
           icon: Icons.link,
           title: 'Enlace por correo',
-          subtitle: 'Recibe un enlace de verificación en tu bandeja de entrada',
-          onTap: _requestingMethod ? null : () => _selectMethod('link'),
+          subtitle: 'Recibe un enlace de activación directa en tu bandeja de entrada',
+          onTap: (_requestingMethod || _currentEmail.isEmpty) ? null : () => _selectMethod('link'),
         ),
 
         if (_requestingMethod) ...[
@@ -507,7 +569,7 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
 
         const SizedBox(height: 20),
 
-        // ── Secondary button: Volver y editar datos ──
+        // ── Secondary button: Volver al Login / Registro ──
         _buildSecondaryButton(),
       ],
     );
@@ -519,6 +581,7 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
     required String subtitle,
     required VoidCallback? onTap,
   }) {
+    final isDisabled = onTap == null;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -528,9 +591,9 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
           width: double.infinity,
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: _navy950.withValues(alpha: 0.6),
+            color: isDisabled ? _navy950.withValues(alpha: 0.3) : _navy950.withValues(alpha: 0.6),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: _border, width: 1.5),
+            border: Border.all(color: isDisabled ? _border.withValues(alpha: 0.4) : _border, width: 1.5),
           ),
           child: Row(
             children: [
@@ -538,11 +601,11 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: _mint.withValues(alpha: 0.1),
+                  color: _mint.withValues(alpha: isDisabled ? 0.04 : 0.1),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _mint.withValues(alpha: 0.2)),
+                  border: Border.all(color: _mint.withValues(alpha: isDisabled ? 0.1 : 0.2)),
                 ),
-                child: Icon(icon, color: _mint, size: 24),
+                child: Icon(icon, color: isDisabled ? _slate600 : _mint, size: 24),
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -551,8 +614,8 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(
-                        color: _slate100,
+                      style: TextStyle(
+                        color: isDisabled ? _slate500 : _slate100,
                         fontSize: 15,
                         fontWeight: FontWeight.bold,
                       ),
@@ -569,7 +632,7 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right, color: _slate500, size: 22),
+              Icon(Icons.chevron_right, color: isDisabled ? _slate600 : _slate500, size: 22),
             ],
           ),
         ),
@@ -581,8 +644,8 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
   // PHASE 2: CODE INPUT (existing OTP UI)
   // ══════════════════════════════════════════════════════════════════
   Widget _buildCodeInputPhase(AuthState authState) {
-    final maskedEmail = _maskEmail(widget.email);
-    final domain = _emailDomain(widget.email);
+    final maskedEmail = _maskEmail(_currentEmail);
+    final domain = _emailDomain(_currentEmail);
 
     return Column(
       children: [
@@ -644,11 +707,11 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
                     children: [
                       TextSpan(
                         text: 'El código fue enviado a tu correo $domain. '
-                            'Revisa también tu carpeta de spam. '
+                            'Revisa también tu bandeja de spam. '
                             'El código expira en ',
                       ),
                       const TextSpan(
-                        text: '10 minutos',
+                        text: '15 minutos',
                         style: TextStyle(
                           color: _mint,
                           fontWeight: FontWeight.bold,
@@ -732,7 +795,7 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Enviamos un enlace a ${_maskEmail(widget.email)}. '
+                'Enviamos un enlace a ${_maskEmail(_currentEmail)}. '
                 'Una vez hagas clic en él, regresa aquí y presiona el botón.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(

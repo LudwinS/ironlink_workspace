@@ -1,3 +1,7 @@
+use argon2::{
+    password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
+    Argon2,
+};
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
@@ -20,6 +24,18 @@ pub struct AppState {
 }
 
 // ─── DTOs ────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct ForgotPasswordDto {
+    pub email: String,
+}
+
+#[derive(Deserialize)]
+pub struct ResetPasswordDto {
+    pub email: String,
+    pub code: String,
+    pub new_password: String,
+}
 
 #[derive(Deserialize)]
 pub struct RequestVerificationDto {
@@ -133,8 +149,13 @@ pub async fn request_verification(
         );
     }
 
-    // 3. Generar código o token según el método
-    let expires_at = Utc::now() + Duration::minutes(10);
+    // 3. Limpiar tokens expirados anteriores y generar nuevo con 15 min de vigencia
+    let _ = sqlx::query("DELETE FROM verification_tokens WHERE user_id = $1 AND expires_at < NOW()")
+        .bind(user_id)
+        .execute(&state.pool)
+        .await;
+
+    let expires_at = Utc::now() + Duration::minutes(15);
 
     if payload.method == "link" {
         // Generar token de 64 caracteres hexadecimales (32 bytes)
@@ -523,6 +544,267 @@ pub async fn verify_link(
                 email,
                 role,
             }),
+        }),
+    )
+}
+
+// ─── POST /forgot-password ───────────────────────────────────────────────
+
+pub async fn forgot_password(
+    State(state): State<AppState>,
+    Json(payload): Json<ForgotPasswordDto>,
+) -> (StatusCode, Json<ApiResponse>) {
+    let email = payload.email.trim().to_lowercase();
+    if email.is_empty() || !email.contains('@') {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                success: false,
+                message: "Por favor ingresa un correo electrónico válido.".to_string(),
+                field_errors: None,
+            }),
+        );
+    }
+
+    // 1. Buscar usuario
+    let user = sqlx::query_as::<_, (Uuid, String)>(
+        "SELECT id, name FROM users WHERE LOWER(email) = LOWER($1)"
+    )
+    .bind(&email)
+    .fetch_optional(&state.pool)
+    .await;
+
+    let user_id = match user {
+        Ok(Some(u)) => u.0,
+        Ok(None) => {
+            return (
+                StatusCode::OK,
+                Json(ApiResponse {
+                    success: true,
+                    message: "Si tu correo está registrado, recibirás un código de 6 dígitos para restablecer tu contraseña.".to_string(),
+                    field_errors: None,
+                }),
+            );
+        }
+        Err(e) => {
+            eprintln!("Error en forgot_password: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    success: false,
+                    message: "Error interno del servidor.".to_string(),
+                    field_errors: None,
+                }),
+            );
+        }
+    };
+
+    // 2. Limpiar tokens de recuperación anteriores
+    let _ = sqlx::query("DELETE FROM verification_tokens WHERE user_id = $1 AND method = 'reset_code'")
+        .bind(user_id)
+        .execute(&state.pool)
+        .await;
+
+    // 3. Generar código OTP de 6 dígitos con 15 min de vigencia
+    let code: String = {
+        let mut rng = rand::thread_rng();
+        format!("{:06}", rng.gen_range(0..1_000_000u32))
+    };
+    let expires_at = Utc::now() + Duration::minutes(15);
+
+    if let Err(e) = sqlx::query(
+        "INSERT INTO verification_tokens (user_id, code, method, expires_at) VALUES ($1, $2, 'reset_code', $3)"
+    )
+    .bind(user_id)
+    .bind(&code)
+    .bind(expires_at)
+    .execute(&state.pool)
+    .await {
+        eprintln!("Error al insertar token de recuperación: {}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                success: false,
+                message: "Error al generar código de recuperación.".to_string(),
+                field_errors: None,
+            }),
+        );
+    }
+
+    // 4. Enviar correo SMTP
+    let _ = mailer::send_password_reset_code(&state.mailer, &state.config.smtp_from, &email, &code).await;
+
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            success: true,
+            message: "Código de recuperación de 6 dígitos enviado exitosamente a tu correo.".to_string(),
+            field_errors: None,
+        }),
+    )
+}
+
+// ─── POST /reset-password ────────────────────────────────────────────────
+
+pub async fn reset_password(
+    State(state): State<AppState>,
+    Json(payload): Json<ResetPasswordDto>,
+) -> (StatusCode, Json<ApiResponse>) {
+    let email = payload.email.trim().to_lowercase();
+    let code = payload.code.trim().to_string();
+
+    // 1. Validar política de contraseña
+    let field_errors = crate::auth::service::validate_password(&payload.new_password);
+    if !field_errors.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                success: false,
+                message: "La nueva contraseña no cumple con los requisitos de seguridad.".to_string(),
+                field_errors: Some(field_errors),
+            }),
+        );
+    }
+
+    // 2. Buscar usuario
+    let user = sqlx::query_as::<_, (Uuid,)>(
+        "SELECT id FROM users WHERE LOWER(email) = LOWER($1)"
+    )
+    .bind(&email)
+    .fetch_optional(&state.pool)
+    .await;
+
+    let user_id = match user {
+        Ok(Some(u)) => u.0,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(ApiResponse {
+                    success: false,
+                    message: "No se encontró ningún usuario con ese correo.".to_string(),
+                    field_errors: None,
+                }),
+            );
+        }
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    success: false,
+                    message: "Error interno al buscar usuario.".to_string(),
+                    field_errors: None,
+                }),
+            );
+        }
+    };
+
+    // 3. Verificar código no expirado
+    let token = sqlx::query_as::<_, (Uuid,)>(
+        "SELECT id FROM verification_tokens WHERE user_id = $1 AND code = $2 AND method = 'reset_code' AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1"
+    )
+    .bind(user_id)
+    .bind(&code)
+    .fetch_optional(&state.pool)
+    .await;
+
+    let token_id = match token {
+        Ok(Some(t)) => t.0,
+        Ok(None) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse {
+                    success: false,
+                    message: "Código de recuperación inválido o expirado. Solicita uno nuevo.".to_string(),
+                    field_errors: None,
+                }),
+            );
+        }
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    success: false,
+                    message: "Error al validar token de recuperación.".to_string(),
+                    field_errors: None,
+                }),
+            );
+        }
+    };
+
+    // 4. Hashear nueva contraseña con Argon2id
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+    let new_hash = match argon2.hash_password(payload.new_password.as_bytes(), &salt) {
+        Ok(h) => h.to_string(),
+        Err(e) => {
+            eprintln!("Error al hashear contraseña en reset_password: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    success: false,
+                    message: "Error al proteger la nueva contraseña.".to_string(),
+                    field_errors: None,
+                }),
+            );
+        }
+    };
+
+    // 5. Iniciar transacción: actualizar contraseña, activar cuenta si estaba pendiente y limpiar tokens
+    let mut tx = match state.pool.begin().await {
+        Ok(t) => t,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    success: false,
+                    message: "Error interno al iniciar actualización.".to_string(),
+                    field_errors: None,
+                }),
+            );
+        }
+    };
+
+    if let Err(e) = sqlx::query(
+        "UPDATE users SET password = $1, estado = 'ACTIVE', intentos_fallidos = 0, bloqueado_hasta = NULL, updated_at = NOW() WHERE id = $2"
+    )
+    .bind(&new_hash)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await {
+        eprintln!("Error al actualizar password en reset_password: {}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                success: false,
+                message: "Error al guardar la nueva contraseña.".to_string(),
+                field_errors: None,
+            }),
+        );
+    }
+
+    let _ = sqlx::query("DELETE FROM verification_tokens WHERE id = $1")
+        .bind(token_id)
+        .execute(&mut *tx)
+        .await;
+
+    if let Err(e) = tx.commit().await {
+        eprintln!("Error al confirmar commit en reset_password: {}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                success: false,
+                message: "Error al completar el restablecimiento de contraseña.".to_string(),
+                field_errors: None,
+            }),
+        );
+    }
+
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            success: true,
+            message: "¡Contraseña restablecida exitosamente! Ya puedes iniciar sesión con tu nueva contraseña.".to_string(),
+            field_errors: None,
         }),
     )
 }

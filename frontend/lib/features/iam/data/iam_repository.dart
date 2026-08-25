@@ -222,4 +222,132 @@ class IamRepository {
       throw Exception(errorMessage);
     }
   }
+
+  // ── Sprint 2: IRL-IAM-US-05 (Perfil de Usuario) ─────────────────────────
+
+  /// Obtiene el perfil completo del usuario autenticado
+  Future<Map<String, dynamic>> fetchProfile() async {
+    try {
+      final response = await _client.get('/users/me');
+      final data = response.data as Map<String, dynamic>;
+      if (data['profile'] != null) {
+        return data['profile'] as Map<String, dynamic>;
+      }
+      throw Exception(data['message'] ?? 'Error al obtener perfil');
+    } on DioException catch (e) {
+      final msg = e.response?.data?['message'] ?? 'Error de conexión al cargar perfil';
+      throw Exception(msg);
+    }
+  }
+
+  /// Actualiza los datos y personalización del perfil
+  Future<Map<String, dynamic>> updateProfile({
+    String? name,
+    String? telefono,
+    String? bio,
+    String? avatarColor,
+    String? statusText,
+    String? avatarUrl,
+  }) async {
+    try {
+      final body = <String, dynamic>{};
+      if (name != null) body['name'] = name;
+      if (telefono != null) body['telefono'] = telefono;
+      if (bio != null) body['bio'] = bio;
+      if (avatarColor != null) body['avatar_color'] = avatarColor;
+      if (statusText != null) body['status_text'] = statusText;
+      if (avatarUrl != null) body['avatar_url'] = avatarUrl;
+
+      final response = await _client.put(
+        '/users/me',
+        data: body,
+      );
+      final data = response.data as Map<String, dynamic>;
+      if (data['profile'] != null) {
+        return data['profile'] as Map<String, dynamic>;
+      }
+      throw Exception(data['message'] ?? 'Error al actualizar perfil');
+    } on DioException catch (e) {
+      final msg = e.response?.data?['message'] ?? 'Error al guardar cambios de perfil';
+      throw Exception(msg);
+    }
+  }
+
+  /// Cambia la contraseña del usuario autenticado
+  Future<String> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    try {
+      final response = await _client.put(
+        '/users/me/password',
+        data: {
+          'current_password': currentPassword,
+          'new_password': newPassword,
+        },
+      );
+      final data = response.data as Map<String, dynamic>;
+      return data['message'] ?? 'Contraseña actualizada exitosamente.';
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      if (data is Map<String, dynamic>) {
+        if (data['field_errors'] != null && data['field_errors'] is Map) {
+          final errs = (data['field_errors'] as Map).values.join('. ');
+          throw Exception(errs);
+        }
+        throw Exception(data['message'] ?? 'Error al cambiar contraseña');
+      }
+      throw Exception('Error de conexión al cambiar contraseña');
+    }
+  }
+
+  /// Solicita un código de recuperación de contraseña para un correo
+  Future<String> forgotPassword({required String email}) async {
+    try {
+      final response = await _client.post(
+        '/forgot-password',
+        data: {
+          'email': email,
+        },
+      );
+      final data = response.data as Map<String, dynamic>;
+      return data['message'] ?? 'Código de recuperación enviado.';
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      if (data is Map<String, dynamic>) {
+        throw Exception(data['message'] ?? 'Error al solicitar código de recuperación');
+      }
+      throw Exception('Fallo al conectar con el servidor de recuperación');
+    }
+  }
+
+  /// Restablece la contraseña con el código OTP recibido
+  Future<String> resetPassword({
+    required String email,
+    required String code,
+    required String newPassword,
+  }) async {
+    try {
+      final response = await _client.post(
+        '/reset-password',
+        data: {
+          'email': email,
+          'code': code,
+          'new_password': newPassword,
+        },
+      );
+      final data = response.data as Map<String, dynamic>;
+      return data['message'] ?? 'Contraseña restablecida exitosamente.';
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      if (data is Map<String, dynamic>) {
+        if (data['field_errors'] != null && data['field_errors'] is Map) {
+          final errs = (data['field_errors'] as Map).values.join('. ');
+          throw Exception(errs);
+        }
+        throw Exception(data['message'] ?? 'Código de recuperación inválido o error al restablecer contraseña');
+      }
+      throw Exception('Fallo al conectar con el servidor para restablecer contraseña');
+    }
+  }
 }

@@ -53,6 +53,38 @@ pub async fn send_verification_code(
     send_email(mailer, from_email, to, "IronLink — Código de verificación", &html_body).await
 }
 
+/// Envía un código OTP para restablecer la contraseña
+pub async fn send_password_reset_code(
+    mailer: &SmtpMailer,
+    from_email: &str,
+    to: &str,
+    code: &str,
+) -> Result<(), String> {
+    let html_body = format!(
+        r#"
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="UTF-8"></head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #0b132b; color: #f8fafc; padding: 20px;">
+            <div style="max-width: 500px; margin: auto; background: #1e293b; border-radius: 12px; padding: 32px; border: 1px solid #334155;">
+                <h2 style="color: #00e5ff; text-align: center; margin-top: 0;">⚡ IronLink Security</h2>
+                <h3 style="color: #f8fafc; text-align: center;">Recuperación de Contraseña</h3>
+                <p style="color: #cbd5e1; font-size: 14px;">Hemos recibido una solicitud para restablecer tu contraseña. Tu código de seguridad de 6 dígitos es:</p>
+                <div style="text-align: center; margin: 24px 0;">
+                    <span style="font-size: 34px; font-weight: bold; letter-spacing: 8px; color: #00e5ff; background: #0f172a; padding: 12px 24px; border-radius: 8px; border: 1.5px solid #00e5ff;">{code}</span>
+                </div>
+                <p style="color: #94a3b8; font-size: 13px;">Este código es de uso único y tiene una vigencia de <b>15 minutos</b>. Si no solicitaste este cambio, puedes ignorar este correo; tu cuenta seguirá protegida.</p>
+                <hr style="border: none; border-top: 1px solid #334155; margin: 24px 0;">
+                <p style="color: #64748b; font-size: 11px; text-align: center;">IronLink Security • Cifrado Argon2id</p>
+            </div>
+        </body>
+        </html>
+        "#
+    );
+
+    send_email(mailer, from_email, to, "IronLink — Código de Recuperación de Contraseña", &html_body).await
+}
+
 /// Envía un enlace de verificación por correo electrónico usando el transporte compartido
 pub async fn send_verification_link(
     mailer: &SmtpMailer,

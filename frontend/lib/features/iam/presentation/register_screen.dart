@@ -62,10 +62,15 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     });
 
     if (_formKey.currentState!.validate()) {
+      String phone = _phoneController.text.trim();
+      if (!phone.startsWith('+')) {
+        phone = '+503$phone';
+      }
+
       final success = await ref.read(authProvider.notifier).register(
             name: _nameController.text.trim(),
             email: _emailController.text.trim(),
-            phone: _phoneController.text.trim(),
+            phone: phone,
             password: _passwordController.text,
           );
 

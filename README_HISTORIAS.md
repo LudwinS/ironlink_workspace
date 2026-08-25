@@ -1,66 +1,68 @@
-# 📑 Reporte de Progreso de Historias de Usuario — Sprint 1 (IronLink)
+# 📑 Reporte Integral de Historias de Usuario — Sprint 1 & Sprint 2 (IronLink Enterprise)
 
-Este documento resume el progreso y estado actual de las Historias de Usuario planificadas para el **Sprint 1** de **IronLink**, detallando el funcionamiento de la arquitectura de seguridad y tokens de acceso (JWT).
-
----
-
-## 📋 Cuadro de Progreso de Historias de Usuario
-
-| ID de Historia | Tarea / Característica | Estado Frontend | Estado Backend | Estatus General |
-|---|---|---|---|---|
-| **IRL-IAM-US-01** | Registro de usuarios con validaciones de contraseña segura. | **100% Completado** | **100% Completado** | **Terminado** |
-| **IRL-IAM-US-02** | Verificación de correo por código OTP y Enlace de activación. | **100% Completado** | **100% Completado** | **Terminado** |
-| **IRL-IAM-US-04** | Inicio de sesión con correo, contraseña y JWT. | **100% Completado** | **100% Completado** | **Terminado** |
-| **IRL-IAM-US-06** | Gestión de roles y restricciones de acceso (RBAC). | **100% Completado** | **100% Completado** | **Terminado** |
-| **IRL-WKS-US-01** | Creación y gestión de Nodos (Workspaces) con tokens de invitación. | **100% Completado** | **100% Completado** | **Terminado** |
+Este documento consolida el progreso, estado técnico, arquitectura de seguridad y base de datos relacional correspondiente al **Sprint 1** y al **Sprint 2** del sistema **IronLink**, desarrollado por el equipo **InnovaSoft** (7 integrantes).
 
 ---
 
-## Arquitectura de Tokens de Acceso y Sesión (JWT)
+## 👥 Equipo de Desarrollo e Ingeniería (InnovaSoft — 7 Integrantes)
 
-Para cumplir con las políticas de seguridad y comunicación de extremo a extremo, se ha implementado un esquema de **Doble Token (Access + Refresh Token)**:
-
-### 1. Access Token (Token de Acceso)
-*   **Tecnología**: JSON Web Token (JWT).
-*   **Generación**: Emitido por el backend en `/login` tras validar las credenciales de un usuario `ACTIVE`.
-*   **Contenido (Claims)**: Contiene el ID del usuario (`sub`), su rol (`role`) y la fecha de expiración (`exp`).
-*   **Vigencia**: 15 minutos (para mitigar el riesgo si el token es interceptado).
-*   **Transmisión**: El frontend (`ApiClient` en Dio) lo inyecta automáticamente en la cabecera `Authorization: Bearer <token>` en cada consulta a rutas protegidas.
-
-### 2. Refresh Token (Token de Refresco)
-*   **Tecnología**: Identificador único aleatorio (UUIDv4).
-*   **Almacenamiento**: Guardado de forma segura en la base de datos (tabla `refresh_tokens`) y retornado al cliente.
-*   **Vigencia**: 7 días.
-*   **Objetivo**: Permitir al frontend solicitar un nuevo Access Token cuando este expire sin obligar al usuario a introducir sus credenciales nuevamente.
-
-### 3. Persistencia en el Frontend
-*   Los tokens y datos del usuario se almacenan de manera encriptada utilizando **DPAPI nativo de Windows** y **Android EncryptedSharedPreferences** a través de la biblioteca `SecureVault` (que usa `FlutterSecureStorage`).
-*   **Arreglo del Interceptor (Importante)**: Se corrigió un bug en `api_client.dart` donde el interceptor de peticiones no se estaba agregando en ciertas circunstancias (debido a la presencia de interceptores predeterminados de Flutter en la lista `Dio`). Ahora se inicializa de forma robusta con un flag booleano, asegurando la transmisión continua del token.
+1. **Ludwin Saúl Vásquez Romero** — Scrum Master / Backend & Architecture Lead
+2. **Luis Alexander Rivera Alvarez** — QA Lead / Database & Security Dev
+3. **Alberto José Velázquez Paz** — Frontend Lead / Desktop UI & QA Tester
+4. **Luis Ángel Zúñiga Menjívar** — Backend Dev / API Security & Conformance
+5. **Ricardo Alberto Mendiola Hernández** — Dev / Chat Persistente & Perfil Lead
+6. **Víctor Arnoldo Iglesias Sandoval** — Dev / Reuniones & Servicios Síncronos
+7. **José Luis Fuentes Ochoa** — Dev / Subgrupos & Organización de Nodos
 
 ---
 
-## 🎯 Detalle de Historias de Usuario
+## 📋 Cuadro General de Progreso de Historias de Usuario
 
-### 1. IRL-IAM-US-01: Registro Seguro
-*   **Frontend**: Formulario con indicador visual de seguridad de contraseña de 5 niveles (mínimo 8 caracteres, mayúsculas, minúsculas, números y caracteres especiales) con validaciones inline en tiempo real.
-*   **Backend**: Hasheo de contraseña con **Argon2id** de forma segura y validación de correos y teléfonos duplicados. Asignación automática de rol `ADMIN` para correos con el nombre `"ludwin"`.
+| ID Historia | Épica / Característica | Estado Frontend | Estado Backend | Estatus General | Sprint |
+|---|---|---|---|---|---|
+| **IRL-IAM-US-01** | Registro seguro de usuarios con entropía y Argon2id | **100% Completado** | **100% Completado** | **Terminado** | Sprint 1 |
+| **IRL-IAM-US-02** | Verificación por doble canal OTP (6 dígitos) y Magic Link | **100% Completado** | **100% Completado** | **Terminado** | Sprint 1 |
+| **IRL-IAM-US-04** | Inicio de sesión con correo, contraseña y tokens JWT | **100% Completado** | **100% Completado** | **Terminado** | Sprint 1 |
+| **IRL-IAM-US-06** | Gestión de roles y control de acceso basado en roles (RBAC) | **100% Completado** | **100% Completado** | **Terminado** | Sprint 1 |
+| **IRL-WKS-US-01** | Creación y administración de Nodos (Salas) con tokens únicos | **100% Completado** | **100% Completado** | **Terminado** | Sprint 1 |
+| **IRL-WKS-US-03** | Chat persistente en canales de Nodo con avatar y roles | **100% Completado** | **100% Completado** | **Terminado** | **Sprint 2** |
+| **IRL-WKS-US-02** | Creación de Subgrupos públicos/privados y membresías dinámicas | **100% Completado** | **100% Completado** | **Terminado** | **Sprint 2** |
+| **IRL-WKS-US-04** | Programación de reuniones síncronas con Google Meet y UTC | **100% Completado** | **100% Completado** | **Terminado** | **Sprint 2** |
+| **IRL-IAM-US-05** | Perfil de usuario, presencia en tiempo real y cambio seguro de clave | **100% Completado** | **100% Completado** | **Terminado** | **Sprint 2** |
 
-### 2. IRL-IAM-US-02: Verificación de Cuenta
-*   **Frontend**: Pantalla con fila de 6 campos de texto de auto-enfoque para código OTP y opción de reenvío con temporizador de 60 segundos. Pantalla de éxito en paso `③ LISTO`.
-*   **Backend**: Envío de código OTP de 6 dígitos o enlace seguro de 64 caracteres por correo real (usando el servidor SMTP de Gmail autenticado con App Password). Activación en base de datos (`estado = 'ACTIVE'`) y limpieza automática de tokens.
+---
 
-### 3. IRL-IAM-US-04: Inicio de Sesión y Seguridad
-*   **Backend**: Bloqueo de cuenta automático tras 5 intentos fallidos consecutivos durante 15 minutos (columna `bloqueado_hasta` en la base de datos). 
-*   **Frontend**: Almacenamiento seguro del token de acceso tras el login y navegación condicional automática (`GoRouter`) en base al estado de sesión en `SecureVault`.
+## 🛡️ Arquitectura de Seguridad, Criptografía y Tokens JWT
 
-### 4. IRL-IAM-US-06: Control de Roles (RBAC)
-*   **Base de Datos**: Roles tipados como ENUM (`'ADMIN'`, `'MODERATOR'`, `'MEMBER'`). La cuenta `ludwinsaulromero@gmail.com` está configurada como `ADMIN` con acceso total.
-*   **Backend**: Middleware `jwt_auth` para validar firmas de tokens y middleware `require_admin` para restringir accesos administrativos (como el cambio de roles en `/admin/users/:id/role`).
-*   **Frontend**: Ocultamiento de la pestaña de Configuración en el menú lateral para usuarios sin rol `ADMIN`.
+### 1. Tokens de Acceso y Refresco (Doble Token JWT)
+*   **Access Token**: Emitido por el backend en `/login` tras validar credenciales con Argon2id. Contiene el ID del usuario (`sub`), rol (`role`) y expiración de 15 minutos.
+*   **Refresh Token**: Token opaco persistido en PostgreSQL con vigencia de 7 días. Permite renovación desatendida mediante rotación criptográfica.
+*   **Transmisión**: El cliente de escritorio inyecta automáticamente la cabecera `Authorization: Bearer <token>` en cada consulta HTTP protegida.
 
-### 5. IRL-WKS-US-01: Nodos y Moderación (Estilo Discord)
-*   **Nomenclatura**: Se eliminó toda referencia a "aulas/salas/UGB" y se adaptó la terminología técnica a **Nodos** e **IronLink**.
-*   **Creación**: Cualquier usuario puede crear un nodo desde la barra lateral o botón flotante. El creador se registra automáticamente como miembro con rol `'OWNER'`.
-*   **Invitación**: Generación de tokens únicos hexadecimales de 32 caracteres para compartir. Otros usuarios pueden unirse al nodo introduciendo este token en la interfaz de "Unirse a nodo".
+### 2. Hashing de Contraseñas con Argon2id
+*   Todas las credenciales se hashean utilizando **Argon2id** con salt criptográfico generado por hardware (`rand::rngs::OsRng`), previniendo ataques de canal lateral y tablas rainbow.
 
+---
 
+## 🗄️ Esquema de Base de Datos Relacional (PostgreSQL)
+
+### Migración 001 (`001_sprint1_complete.sql`)
+*   `users`: ID, email, password_hash, full_name, telefono, rol, is_active, status, token_verificacion, token_expiracion, avatar_color, bio, status_text.
+*   `nodos`: ID, nombre, descripcion, token_acceso, creado_por, created_at.
+*   `nodo_miembros`: ID, id_nodo, id_usuario, rol, joined_at.
+
+### Migración 002 (`002_sprint2_colaboracion.sql`)
+*   `mensajes`: ID, id_nodo, id_usuario, contenido, created_at (TIMESTAMPTZ UTC).
+*   `subgrupos`: ID, id_nodo, nombre, descripcion, es_privado, creado_por, created_at.
+*   `subgrupo_miembros`: ID, id_subgrupo, id_usuario, rol, joined_at.
+*   `reuniones`: ID, id_nodo, titulo, descripcion, fecha_reunion, duracion_minutos, meet_url, creada_por, created_at.
+
+---
+
+## 🧪 Resumen de Calidad y Pruebas (QA Testing)
+
+*   **Total de Casos de Prueba Ejecutados en Sprint 2**: 23 Casos Diseñados y Ejecutados.
+*   **Tasa de Aprobación**: **100% Pasa** (0 errores bloqueantes).
+*   **Defectos Detectados y Resueltos**: 5 Bugs cerrados (BUG-S2-001 al BUG-S2-005).
+*   **Auditoría de DoR y DoD**: 100% de cumplimiento verificado en Trello y matrices de trazabilidad.
+*   **Plataforma de Ejecución**: macOS darwin-arm64 (Apple Silicon) & Windows x64.

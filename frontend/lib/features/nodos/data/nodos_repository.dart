@@ -263,11 +263,14 @@ class NodosRepository {
     }
   }
 
-  /// Obtiene los últimos 100 mensajes de un nodo.
-  /// GET /nodos/:id/mensajes
-  Future<List<Mensaje>> fetchMensajes(String nodoId) async {
+  /// Obtiene los últimos 100 mensajes de un nodo o subgrupo.
+  /// GET /nodos/:id/mensajes(?subgrupo_id=...)
+  Future<List<Mensaje>> fetchMensajes(String nodoId, {String? subgrupoId}) async {
     try {
-      final response = await _client.get('/nodos/$nodoId/mensajes');
+      final response = await _client.get(
+        '/nodos/$nodoId/mensajes',
+        queryParameters: subgrupoId != null ? {'subgrupo_id': subgrupoId} : null,
+      );
       final data = response.data;
       if (data is Map<String, dynamic> && data['mensajes'] is List) {
         return (data['mensajes'] as List)
@@ -281,13 +284,15 @@ class NodosRepository {
     }
   }
 
-  /// Envía un mensaje a un nodo.
+  /// Envía un mensaje a un nodo o subgrupo.
   /// POST /nodos/:id/mensajes
-  Future<Mensaje> sendMensaje(String nodoId, String contenido) async {
+  Future<Mensaje> sendMensaje(String nodoId, String contenido, {String? subgrupoId}) async {
     try {
+      final body = <String, dynamic>{'contenido': contenido};
+      if (subgrupoId != null) body['subgrupo_id'] = subgrupoId;
       final response = await _client.post(
         '/nodos/$nodoId/mensajes',
-        data: {'contenido': contenido},
+        data: body,
       );
       final data = response.data;
       if (data is Map<String, dynamic> && data['mensaje'] is Map<String, dynamic>) {
@@ -371,6 +376,7 @@ class Mensaje {
   final String userName;
   final String contenido;
   final DateTime createdAt;
+  final String? subgrupoId;
 
   const Mensaje({
     required this.id,
@@ -379,6 +385,7 @@ class Mensaje {
     required this.userName,
     required this.contenido,
     required this.createdAt,
+    this.subgrupoId,
   });
 
   factory Mensaje.fromJson(Map<String, dynamic> json) {
@@ -391,6 +398,7 @@ class Mensaje {
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at'].toString()) ?? DateTime.now()
           : DateTime.now(),
+      subgrupoId: json['subgrupo_id'] as String?,
     );
   }
 }

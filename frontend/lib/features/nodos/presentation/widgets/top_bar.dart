@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../providers/nodos_provider.dart';
 
+import '../../../iam/presentation/widgets/profile_dialog.dart';
+
 const _navy950 = AppColors.navy950;
 const _border = AppColors.border;
 const _mint = AppColors.mint;
@@ -75,26 +77,30 @@ class TopBar extends ConsumerWidget {
             onPressed: () {},
           ),
           const SizedBox(width: 8),
-          // Avatar
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: const LinearGradient(
-                colors: [_mint, _cyan],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
+          // Avatar interactivo
+          InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => ProfileDialog.show(context),
+            child: Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: const LinearGradient(
+                  colors: [_mint, _cyan],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                border: Border.all(color: _border, width: 1.5),
               ),
-              border: Border.all(color: _border, width: 1.5),
-            ),
-            child: Center(
-              child: Text(
-                initials,
-                style: const TextStyle(
-                  color: _navy950,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 13,
+              child: Center(
+                child: Text(
+                  initials,
+                  style: const TextStyle(
+                    color: _navy950,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13,
+                  ),
                 ),
               ),
             ),
@@ -105,10 +111,9 @@ class TopBar extends ConsumerWidget {
   }
 
   String _getInitials(String name) {
-    final parts = name.trim().split(RegExp(r'\s+'));
-    if (parts.length >= 2) {
-      return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
-    }
-    return name.isNotEmpty ? name[0].toUpperCase() : 'U';
+    if (name.isEmpty) return 'U';
+    final parts = name.trim().split(' ');
+    if (parts.length == 1) return parts[0][0].toUpperCase();
+    return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
   }
 }

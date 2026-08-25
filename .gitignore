@@ -15,6 +15,9 @@ frontend/.packages
 frontend/.flutter-plugins
 frontend/.flutter-plugins-dependencies
 frontend/windows/flutter/ephemeral/
+frontend/macos/Flutter/ephemeral/
+frontend/macos/Pods/
+frontend/macos/Podfile.lock
 
 # --- IDEs y Editores ---
 .idea/

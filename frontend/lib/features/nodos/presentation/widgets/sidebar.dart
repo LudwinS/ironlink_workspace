@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../providers/nodos_provider.dart';
+import '../../providers/chat_provider.dart';
 import '../../../iam/providers/auth_provider.dart';
+import '../../../iam/presentation/widgets/profile_dialog.dart';
 
 const _navy900 = AppColors.navy900;
 const _border = AppColors.border;
@@ -124,6 +126,7 @@ class Sidebar extends ConsumerWidget {
                     label: '# ${nodo.nombre}',
                     isSelected: isSelected,
                     onTap: () {
+                      ref.read(selectedSubgrupoProvider.notifier).state = null;
                       ref.read(selectedNodoProvider.notifier).state = nodo;
                       onSelect(1);
                     },
@@ -140,7 +143,7 @@ class Sidebar extends ConsumerWidget {
             icon: Icons.person_outline_rounded,
             label: username,
             isSelected: false,
-            onTap: () {},
+            onTap: () => ProfileDialog.show(context),
           ),
           if (_canSeeConfig(role))
             NavItem(

@@ -101,12 +101,51 @@ CREATE TABLE IF NOT EXISTS nodo_baneos (
     PRIMARY KEY (nodo_id, user_id)
 );
 
--- 11. Tabla de mensajes de chat en nodos
+-- 11. Tabla de subgrupos de nodos
+CREATE TABLE IF NOT EXISTS subgrupos (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    nodo_id UUID NOT NULL REFERENCES nodos(id) ON DELETE CASCADE,
+    nombre TEXT NOT NULL,
+    descripcion TEXT,
+    es_privado BOOLEAN NOT NULL DEFAULT FALSE,
+    creado_por UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_subgrupos_nodo_id ON subgrupos(nodo_id);
+
+-- 12. Tabla de miembros de subgrupos
+CREATE TABLE IF NOT EXISTS subgrupo_miembros (
+    subgrupo_id UUID NOT NULL REFERENCES subgrupos(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (subgrupo_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_subgrupo_miembros_user_id ON subgrupo_miembros(user_id);
+
+-- 13. Tabla de reuniones de nodos
+CREATE TABLE IF NOT EXISTS reuniones (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    nodo_id UUID NOT NULL REFERENCES nodos(id) ON DELETE CASCADE,
+    titulo TEXT NOT NULL,
+    descripcion TEXT,
+    enlace TEXT NOT NULL,
+    fecha_inicio TIMESTAMPTZ NOT NULL,
+    duracion_minutos INT NOT NULL DEFAULT 30,
+    creado_por UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_reuniones_nodo_id ON reuniones(nodo_id);
+
+-- 14. Tabla de mensajes de chat en nodos y subgrupos
 CREATE TABLE IF NOT EXISTS mensajes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     nodo_id UUID NOT NULL REFERENCES nodos(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     contenido TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    subgrupo_id UUID REFERENCES subgrupos(id) ON DELETE CASCADE
 );
+ALTER TABLE mensajes ADD COLUMN IF NOT EXISTS subgrupo_id UUID REFERENCES subgrupos(id) ON DELETE CASCADE;
 CREATE INDEX IF NOT EXISTS idx_mensajes_nodo_id ON mensajes(nodo_id);
+CREATE INDEX IF NOT EXISTS idx_mensajes_subgrupo_id ON mensajes(subgrupo_id);
+

@@ -4,6 +4,7 @@ class SecureVault {
   static const _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
     wOptions: WindowsOptions(), // Windows native DPAPI encryption
+    mOptions: MacOsOptions(useDataProtectionKeyChain: false),
   );
 
   static const String _accessTokenKey = 'access_token';

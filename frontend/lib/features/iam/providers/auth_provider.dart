@@ -270,6 +270,60 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
+  /// Solicita el código de recuperación de contraseña
+  Future<bool> forgotPassword(String email) async {
+    state = state.copyWith(
+      status: AuthStatus.loading,
+      clearErrors: true,
+      clearSuccess: true,
+    );
+    try {
+      final message = await _repository.forgotPassword(email: email);
+      state = state.copyWith(
+        status: AuthStatus.unauthenticated,
+        email: email,
+        successMessage: message,
+      );
+      return true;
+    } catch (e) {
+      state = state.copyWith(
+        status: AuthStatus.unauthenticated,
+        email: email,
+        errorMessage: e.toString().replaceAll('Exception: ', ''),
+      );
+      return false;
+    }
+  }
+
+  /// Restablece la contraseña con el código OTP
+  Future<bool> resetPassword(String email, String code, String newPassword) async {
+    state = state.copyWith(
+      status: AuthStatus.loading,
+      clearErrors: true,
+      clearSuccess: true,
+    );
+    try {
+      final message = await _repository.resetPassword(
+        email: email,
+        code: code,
+        newPassword: newPassword,
+      );
+      state = state.copyWith(
+        status: AuthStatus.unauthenticated,
+        email: email,
+        successMessage: message,
+      );
+      return true;
+    } catch (e) {
+      state = state.copyWith(
+        status: AuthStatus.unauthenticated,
+        email: email,
+        errorMessage: e.toString().replaceAll('Exception: ', ''),
+      );
+      return false;
+    }
+  }
+
   Future<void> logout() async {
     state = state.copyWith(status: AuthStatus.loading);
     await SecureVault.clearAuthData();

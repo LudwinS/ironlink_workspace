@@ -294,7 +294,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                             baseline: TextBaseline.alphabetic,
                                             child: GestureDetector(
                                               onTap: () {
-                                                // TODO: navigate to recovery
+                                                final email = _emailController.text.trim();
+                                                context.go('/forgot-password?email=${Uri.encodeComponent(email)}');
                                               },
                                               child: const Text(
                                                 'recupérala aquí',
@@ -307,6 +308,26 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                             ),
                                           ),
                                         ],
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+
+                                  // Link para activar cuenta o solicitar nuevo código
+                                  Center(
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        final email = _emailController.text.trim();
+                                        context.go('/verification?email=${Uri.encodeComponent(email)}');
+                                      },
+                                      child: const Text(
+                                        '¿No activaste tu cuenta o expiró el código? Reenviar verificación',
+                                        style: TextStyle(
+                                          color: _cyan,
+                                          fontSize: 12.5,
+                                          fontWeight: FontWeight.w600,
+                                          decoration: TextDecoration.underline,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -376,6 +397,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   // ─── Error Banner ─────────────────────────────────────────────────────
   Widget _buildErrorBanner(String message) {
+    final isUnverified = message.toLowerCase().contains('verific') ||
+        message.toLowerCase().contains('correo') ||
+        message.toLowerCase().contains('activ');
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
@@ -383,16 +408,45 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         border: Border.all(color: _errorRed.withValues(alpha: 0.3)),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.error_outline, color: _errorRed, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              message,
-              style: const TextStyle(color: _errorText, fontSize: 13),
-            ),
+          Row(
+            children: [
+              const Icon(Icons.error_outline, color: _errorRed, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  message,
+                  style: const TextStyle(color: _errorText, fontSize: 13),
+                ),
+              ),
+            ],
           ),
+          if (isUnverified) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _mint,
+                  foregroundColor: _navy950,
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  elevation: 0,
+                ),
+                onPressed: () {
+                  final email = _emailController.text.trim();
+                  context.go('/verification?email=${Uri.encodeComponent(email)}');
+                },
+                icon: const Icon(Icons.mark_email_read_outlined, size: 16),
+                label: const Text(
+                  'Reenviar código / Activar cuenta ahora →',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

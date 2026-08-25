@@ -62,7 +62,9 @@ async fn main() {
         .route("/login", post(auth::service::login))
         .route("/request-verification", post(auth::verification::request_verification))
         .route("/verify-email", post(auth::verification::verify_email))
-        .route("/verify-link/{token}", get(auth::verification::verify_link));
+        .route("/verify-link/{token}", get(auth::verification::verify_link))
+        .route("/forgot-password", post(auth::verification::forgot_password))
+        .route("/reset-password", post(auth::verification::reset_password));
 
     // 7. Rutas protegidas (requieren JWT válido)
     let protected_routes = Router::new()
@@ -79,6 +81,22 @@ async fn main() {
         .route("/nodos/{id}/baneos/{user_id}", delete(nodos::service::unban_miembro))
         .route("/nodos/{id}/mensajes", post(nodos::service::send_mensaje))
         .route("/nodos/{id}/mensajes", get(nodos::service::list_mensajes))
+        // ── Sprint 2: IRL-IAM-US-05 (Perfil de Usuario) ──
+        .route("/users/me", get(auth::service::get_user_profile))
+        .route("/users/me", put(auth::service::update_user_profile))
+        .route("/users/me/password", put(auth::service::change_user_password))
+        // ── Sprint 2: IRL-WKS-US-02 (Subgrupos de Nodos) ──
+        .route("/nodos/{id}/subgrupos", post(nodos::subgrupos::create_subgrupo))
+        .route("/nodos/{id}/subgrupos", get(nodos::subgrupos::list_subgrupos))
+        .route("/nodos/{id}/subgrupos/{subgrupo_id}/join", post(nodos::subgrupos::join_subgrupo))
+        .route("/nodos/{id}/subgrupos/{subgrupo_id}/leave", post(nodos::subgrupos::leave_subgrupo))
+        .route("/nodos/{id}/subgrupos/{subgrupo_id}", delete(nodos::subgrupos::delete_subgrupo))
+        .route("/nodos/{id}/subgrupos/{subgrupo_id}/miembros", get(nodos::subgrupos::list_subgrupo_miembros))
+        // ── Sprint 2: IRL-WKS-US-04 (Reuniones Programadas) ──
+        .route("/nodos/{id}/reuniones", post(nodos::reuniones::create_reunion))
+        .route("/nodos/{id}/reuniones", get(nodos::reuniones::list_reuniones))
+        .route("/nodos/{id}/reuniones/{reunion_id}", put(nodos::reuniones::update_reunion))
+        .route("/nodos/{id}/reuniones/{reunion_id}", delete(nodos::reuniones::delete_reunion))
         .layer(middleware::from_fn(auth::middleware::jwt_auth));
 
     // 8. Rutas de administrador (requieren JWT + rol ADMIN)

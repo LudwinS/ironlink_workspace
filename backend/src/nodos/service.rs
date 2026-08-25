@@ -1,4 +1,4 @@
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use rand::Rng;
@@ -1263,9 +1263,15 @@ pub async fn list_baneos(
 #[derive(Deserialize)]
 pub struct SendMensajeDto {
     pub contenido: String,
+    pub subgrupo_id: Option<Uuid>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize)]
+pub struct ListMensajesQuery {
+    pub subgrupo_id: Option<Uuid>,
+}
+
+#[derive(Serialize, Clone)]
 pub struct MensajeInfo {
     pub id: Uuid,
     pub nodo_id: Uuid,
@@ -1273,6 +1279,7 @@ pub struct MensajeInfo {
     pub user_name: String,
     pub contenido: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    pub subgrupo_id: Option<Uuid>,
 }
 
 #[derive(Serialize)]
@@ -1315,33 +1322,109 @@ pub async fn send_mensaje(
     .fetch_optional(&state.pool)
     .await;
 
-    if let Ok(None) = member_check {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(MensajeResponse {
-                success: false,
-                message: "No tienes permiso para enviar mensajes en este nodo ya que no eres miembro.".to_string(),
-                mensaje: None,
-                mensajes: None,
-            }),
-        );
+    let user_node_role = match member_check {
+        Ok(Some((rol,))) => Some(rol),
+        _ => {
+            if auth_user.role == "ADMIN" {
+                Some("GLOBAL_ADMIN".to_string())
+            } else {
+                None
+            }
+        }
+    };
+
+    let user_role_str = match user_node_role {
+        Some(r) => r,
+        None => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(MensajeResponse {
+                    success: false,
+                    message: "No tienes permiso para enviar mensajes en este nodo ya que no eres miembro.".to_string(),
+                    mensaje: None,
+                    mensajes: None,
+                }),
+            );
+        }
+    };
+
+    // 2. Si es para un subgrupo, validar que exista en este nodo y si es privado validar membresía
+    if let Some(subgrupo_id) = payload.subgrupo_id {
+        let sub_check = sqlx::query_as::<_, (bool,)>(
+            "SELECT es_privado FROM subgrupos WHERE id = $1 AND nodo_id = $2"
+        )
+        .bind(subgrupo_id)
+        .bind(id)
+        .fetch_optional(&state.pool)
+        .await;
+
+        match sub_check {
+            Ok(Some((es_privado,))) => {
+                if es_privado && user_role_str != "OWNER" && user_role_str != "GLOBAL_ADMIN" {
+                    let is_sub_member = sqlx::query_scalar::<_, bool>(
+                        "SELECT EXISTS(SELECT 1 FROM subgrupo_miembros WHERE subgrupo_id = $1 AND user_id = $2)"
+                    )
+                    .bind(subgrupo_id)
+                    .bind(auth_user.user_id)
+                    .fetch_one(&state.pool)
+                    .await
+                    .unwrap_or(false);
+
+                    if !is_sub_member {
+                        return (
+                            StatusCode::FORBIDDEN,
+                            Json(MensajeResponse {
+                                success: false,
+                                message: "Debes unirte a este subgrupo privado para enviar mensajes.".to_string(),
+                                mensaje: None,
+                                mensajes: None,
+                            }),
+                        );
+                    }
+                }
+            }
+            Ok(None) => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(MensajeResponse {
+                        success: false,
+                        message: "El subgrupo especificado no existe en este nodo.".to_string(),
+                        mensaje: None,
+                        mensajes: None,
+                    }),
+                );
+            }
+            Err(e) => {
+                eprintln!("Error al validar subgrupo: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(MensajeResponse {
+                        success: false,
+                        message: "Error interno al validar el subgrupo.".to_string(),
+                        mensaje: None,
+                        mensajes: None,
+                    }),
+                );
+            }
+        }
     }
 
-    // 2. Insertar mensaje en la base de datos
-    let insert = sqlx::query_as::<_, (Uuid, Uuid, Uuid, String, chrono::DateTime<chrono::Utc>)>(
+    // 3. Insertar mensaje en la base de datos
+    let insert = sqlx::query_as::<_, (Uuid, Uuid, Uuid, String, chrono::DateTime<chrono::Utc>, Option<Uuid>)>(
         r#"
-        INSERT INTO mensajes (nodo_id, user_id, contenido) VALUES ($1, $2, $3)
-        RETURNING id, nodo_id, user_id, contenido, created_at
+        INSERT INTO mensajes (nodo_id, user_id, contenido, subgrupo_id) VALUES ($1, $2, $3, $4)
+        RETURNING id, nodo_id, user_id, contenido, created_at, subgrupo_id
         "#
     )
     .bind(id)
     .bind(auth_user.user_id)
     .bind(contenido)
+    .bind(payload.subgrupo_id)
     .fetch_one(&state.pool)
     .await;
 
     match insert {
-        Ok((msg_id, nodo_id, user_id, contenido, created_at)) => {
+        Ok((msg_id, nodo_id, user_id, contenido, created_at, subgrupo_id)) => {
             // Obtener el nombre del usuario
             let user_name = sqlx::query_as::<_, (String,)>(
                 "SELECT name FROM users WHERE id = $1"
@@ -1364,6 +1447,7 @@ pub async fn send_mensaje(
                         user_name,
                         contenido,
                         created_at,
+                        subgrupo_id,
                     }),
                     mensajes: None,
                 }),
@@ -1390,6 +1474,7 @@ pub async fn list_mensajes(
     State(state): State<AppState>,
     axum::Extension(auth_user): axum::Extension<AuthUser>,
     axum::extract::Path(id): axum::extract::Path<Uuid>,
+    Query(query): Query<ListMensajesQuery>,
 ) -> (StatusCode, Json<MensajeResponse>) {
     // 1. Verificar si el usuario es miembro del nodo
     let member_check = sqlx::query_as::<_, (String,)>(
@@ -1400,38 +1485,133 @@ pub async fn list_mensajes(
     .fetch_optional(&state.pool)
     .await;
 
-    if let Ok(None) = member_check {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(MensajeResponse {
-                success: false,
-                message: "No tienes permiso para ver los mensajes de este nodo ya que no eres miembro.".to_string(),
-                mensaje: None,
-                mensajes: None,
-            }),
-        );
+    let user_node_role = match member_check {
+        Ok(Some((rol,))) => Some(rol),
+        _ => {
+            if auth_user.role == "ADMIN" {
+                Some("GLOBAL_ADMIN".to_string())
+            } else {
+                None
+            }
+        }
+    };
+
+    let user_role_str = match user_node_role {
+        Some(r) => r,
+        None => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(MensajeResponse {
+                    success: false,
+                    message: "No tienes permiso para ver los mensajes de este nodo ya que no eres miembro.".to_string(),
+                    mensaje: None,
+                    mensajes: None,
+                }),
+            );
+        }
+    };
+
+    // 2. Si es para un subgrupo, validar permisos y si es privado validar membresía
+    if let Some(subgrupo_id) = query.subgrupo_id {
+        let sub_check = sqlx::query_as::<_, (bool,)>(
+            "SELECT es_privado FROM subgrupos WHERE id = $1 AND nodo_id = $2"
+        )
+        .bind(subgrupo_id)
+        .bind(id)
+        .fetch_optional(&state.pool)
+        .await;
+
+        match sub_check {
+            Ok(Some((es_privado,))) => {
+                if es_privado && user_role_str != "OWNER" && user_role_str != "GLOBAL_ADMIN" {
+                    let is_sub_member = sqlx::query_scalar::<_, bool>(
+                        "SELECT EXISTS(SELECT 1 FROM subgrupo_miembros WHERE subgrupo_id = $1 AND user_id = $2)"
+                    )
+                    .bind(subgrupo_id)
+                    .bind(auth_user.user_id)
+                    .fetch_one(&state.pool)
+                    .await
+                    .unwrap_or(false);
+
+                    if !is_sub_member {
+                        return (
+                            StatusCode::FORBIDDEN,
+                            Json(MensajeResponse {
+                                success: false,
+                                message: "No tienes acceso a este subgrupo privado.".to_string(),
+                                mensaje: None,
+                                mensajes: None,
+                            }),
+                        );
+                    }
+                }
+            }
+            Ok(None) => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(MensajeResponse {
+                        success: false,
+                        message: "El subgrupo especificado no existe en este nodo.".to_string(),
+                        mensaje: None,
+                        mensajes: None,
+                    }),
+                );
+            }
+            Err(e) => {
+                eprintln!("Error al validar subgrupo: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(MensajeResponse {
+                        success: false,
+                        message: "Error interno al validar el subgrupo.".to_string(),
+                        mensaje: None,
+                        mensajes: None,
+                    }),
+                );
+            }
+        }
     }
 
-    // 2. Obtener lista de mensajes ordenada por fecha (más antiguos primero para flujo de chat)
-    let rows = sqlx::query_as::<_, (Uuid, Uuid, Uuid, String, String, chrono::DateTime<chrono::Utc>)>(
-        r#"
-        SELECT m.id, m.nodo_id, m.user_id, u.name as user_name, m.contenido, m.created_at
-        FROM mensajes m
-        INNER JOIN users u ON m.user_id = u.id
-        WHERE m.nodo_id = $1
-        ORDER BY m.created_at ASC
-        LIMIT 100
-        "#
-    )
-    .bind(id)
-    .fetch_all(&state.pool)
-    .await;
+    // 3. Obtener lista de mensajes según subgrupo_id o general
+    let rows = match query.subgrupo_id {
+        Some(sub_id) => {
+            sqlx::query_as::<_, (Uuid, Uuid, Uuid, String, String, chrono::DateTime<chrono::Utc>, Option<Uuid>)>(
+                r#"
+                SELECT m.id, m.nodo_id, m.user_id, u.name as user_name, m.contenido, m.created_at, m.subgrupo_id
+                FROM mensajes m
+                INNER JOIN users u ON m.user_id = u.id
+                WHERE m.nodo_id = $1 AND m.subgrupo_id = $2
+                ORDER BY m.created_at ASC
+                LIMIT 100
+                "#
+            )
+            .bind(id)
+            .bind(sub_id)
+            .fetch_all(&state.pool)
+            .await
+        }
+        None => {
+            sqlx::query_as::<_, (Uuid, Uuid, Uuid, String, String, chrono::DateTime<chrono::Utc>, Option<Uuid>)>(
+                r#"
+                SELECT m.id, m.nodo_id, m.user_id, u.name as user_name, m.contenido, m.created_at, m.subgrupo_id
+                FROM mensajes m
+                INNER JOIN users u ON m.user_id = u.id
+                WHERE m.nodo_id = $1 AND m.subgrupo_id IS NULL
+                ORDER BY m.created_at ASC
+                LIMIT 100
+                "#
+            )
+            .bind(id)
+            .fetch_all(&state.pool)
+            .await
+        }
+    };
 
     match rows {
         Ok(msgs) => {
             let list = msgs
                 .into_iter()
-                .map(|(msg_id, nodo_id, user_id, user_name, contenido, created_at)| {
+                .map(|(msg_id, nodo_id, user_id, user_name, contenido, created_at, subgrupo_id)| {
                     MensajeInfo {
                         id: msg_id,
                         nodo_id,
@@ -1439,6 +1619,7 @@ pub async fn list_mensajes(
                         user_name,
                         contenido,
                         created_at,
+                        subgrupo_id,
                     }
                 })
                 .collect();
@@ -1467,5 +1648,6 @@ pub async fn list_mensajes(
         }
     }
 }
+
 
 

@@ -5,6 +5,7 @@ import '../../features/iam/presentation/login_screen.dart';
 import '../../features/iam/presentation/register_screen.dart';
 import '../../features/iam/presentation/verification_screen.dart';
 import '../../features/iam/presentation/verification_success_screen.dart';
+import '../../features/iam/presentation/forgot_password_screen.dart';
 import '../../features/nodos/presentation/dashboard_screen.dart';
 import '../../features/iam/providers/auth_provider.dart';
 
@@ -35,7 +36,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       final isGoingToAuth = state.matchedLocation == '/login' ||
           state.matchedLocation == '/register' ||
           state.matchedLocation == '/verification' ||
-          state.matchedLocation == '/verification-success';
+          state.matchedLocation == '/verification-success' ||
+          state.matchedLocation == '/forgot-password';
 
       if (!isLoggedIn) {
         if (!isGoingToAuth) {
@@ -67,6 +69,13 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/verification-success',
         builder: (context, state) => const VerificationSuccessScreen(),
+      ),
+      GoRoute(
+        path: '/forgot-password',
+        builder: (context, state) {
+          final email = state.uri.queryParameters['email'] ?? '';
+          return ForgotPasswordScreen(initialEmail: email);
+        },
       ),
       GoRoute(
         path: '/home',
