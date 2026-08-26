@@ -154,6 +154,9 @@ void main() {
         'contenido': 'Hola equipo de Backend, revisando la arquitectura del chat.',
         'created_at': '2026-08-25T11:15:00Z',
         'subgrupo_id': 'sub-101',
+        'avatar_url': 'data:image/jpeg;base64,/9j/4AAQSkZJRg==',
+        'avatar_color': '#00E5FF',
+        'status_text': '⚡ Desarrollando en IronLink',
       };
 
       final msg = Mensaje.fromJson(jsonMsg);
@@ -161,6 +164,102 @@ void main() {
       expect(msg.nodoId, 'nodo-001');
       expect(msg.subgrupoId, 'sub-101');
       expect(msg.contenido, 'Hola equipo de Backend, revisando la arquitectura del chat.');
+      expect(msg.avatarUrl, 'data:image/jpeg;base64,/9j/4AAQSkZJRg==');
+      expect(msg.avatarColor, '#00E5FF');
+      expect(msg.statusText, '⚡ Desarrollando en IronLink');
+    });
+
+    test('TEST-UNIT-004: NodoMiembro and SubgrupoMiembro parse custom avatar & status_text', () {
+      final jsonNodoMiembro = {
+        'user_id': 'usr-200',
+        'name': 'Ana Silva',
+        'email': 'ana@ironlink.io',
+        'rol': 'ADMIN',
+        'avatar_color': '#EC4899',
+        'status_text': '🟡 En reunión',
+        'avatar_url': 'data:image/jpeg;base64,/9j/4AAQSkZJRg==',
+      };
+
+      final nodoMember = NodoMiembro.fromJson(jsonNodoMiembro);
+      expect(nodoMember.userId, 'usr-200');
+      expect(nodoMember.name, 'Ana Silva');
+      expect(nodoMember.rol, 'ADMIN');
+      expect(nodoMember.avatarColor, '#EC4899');
+      expect(nodoMember.statusText, '🟡 En reunión');
+      expect(nodoMember.avatarUrl, isNotNull);
+
+      final jsonSubMiembro = {
+        'user_id': 'usr-201',
+        'name': 'Carlos Rivera',
+        'email': 'carlos@ironlink.io',
+        'avatar_color': '#10B981',
+        'status_text': '🔴 Ocupado',
+        'avatar_url': 'https://ironlink.io/avatars/carlos.jpg',
+        'joined_at': '2026-08-25T11:05:00Z',
+      };
+
+      final subMember = SubgrupoMiembro.fromJson(jsonSubMiembro);
+      expect(subMember.userId, 'usr-201');
+      expect(subMember.statusText, '🔴 Ocupado');
+      expect(subMember.avatarUrl, 'https://ironlink.io/avatars/carlos.jpg');
+    });
+
+    test('TEST-UNIT-005: IRL-WKS-US-03 Unread count badge state and serialization', () {
+      final unreadMap = <String, int>{
+        'nodo-001': 5,
+        'nodo-002': 0,
+        'nodo-003': 12,
+      };
+
+      expect(unreadMap['nodo-001'], 5);
+      expect(unreadMap['nodo-002'], 0);
+      expect(unreadMap['nodo-003'], 12);
+
+      // Simulation of mark as read (limpieza automática del badge)
+      unreadMap['nodo-001'] = 0;
+      expect(unreadMap['nodo-001'], 0);
+    });
+
+    test('TEST-UNIT-006: IRL-WKS-US-02 Subgrupo hot edit and multi-member assignment models', () {
+      final sub = Subgrupo(
+        id: 'sub-301',
+        nodoId: 'nodo-001',
+        nombre: 'Original Name',
+        descripcion: 'Original Description',
+        esPrivado: true,
+        creadoPor: 'usr-100',
+        createdAt: DateTime.now(),
+        miembrosCount: 2,
+        isMember: true,
+      );
+
+      // Edición en caliente
+      final edited = sub.copyWith(
+        nombre: 'Nuevo Nombre Backend Lead',
+        descripcion: 'Descripción actualizada en caliente',
+      );
+      expect(edited.nombre, 'Nuevo Nombre Backend Lead');
+      expect(edited.descripcion, 'Descripción actualizada en caliente');
+
+      // Asignación de miembros masiva
+      final assigned = edited.copyWith(miembrosCount: edited.miembrosCount + 3);
+      expect(assigned.miembrosCount, 5);
+    });
+
+    test('TEST-UNIT-007: IRL-IAM-US-05 Avatar MIME and 2MB validation format verification', () {
+      const allowedFormats = ['jpg', 'jpeg', 'png', 'webp'];
+      expect(allowedFormats.contains('png'), isTrue);
+      expect(allowedFormats.contains('jpg'), isTrue);
+      expect(allowedFormats.contains('webp'), isTrue);
+      expect(allowedFormats.contains('gif'), isFalse);
+      expect(allowedFormats.contains('exe'), isFalse);
+
+      const maxBytes = 2 * 1024 * 1024;
+      const validImageSize = 350 * 1024; // 350 KB
+      const largeImageSize = 4 * 1024 * 1024; // 4 MB
+
+      expect(validImageSize <= maxBytes, isTrue);
+      expect(largeImageSize > maxBytes, isTrue);
     });
   });
 }

@@ -12,6 +12,7 @@ class Subgrupo {
   final DateTime createdAt;
   final int miembrosCount;
   final bool isMember;
+  final int unreadCount;
 
   const Subgrupo({
     required this.id,
@@ -23,6 +24,7 @@ class Subgrupo {
     required this.createdAt,
     required this.miembrosCount,
     required this.isMember,
+    this.unreadCount = 0,
   });
 
   factory Subgrupo.fromJson(Map<String, dynamic> json) {
@@ -38,6 +40,7 @@ class Subgrupo {
           : DateTime.now(),
       miembrosCount: json['miembros_count'] as int? ?? (json['miembros_count'] is num ? (json['miembros_count'] as num).toInt() : 1),
       isMember: json['is_member'] as bool? ?? false,
+      unreadCount: (json['unread_count'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -51,6 +54,7 @@ class Subgrupo {
     DateTime? createdAt,
     int? miembrosCount,
     bool? isMember,
+    int? unreadCount,
   }) {
     return Subgrupo(
       id: id ?? this.id,
@@ -62,6 +66,7 @@ class Subgrupo {
       createdAt: createdAt ?? this.createdAt,
       miembrosCount: miembrosCount ?? this.miembrosCount,
       isMember: isMember ?? this.isMember,
+      unreadCount: unreadCount ?? this.unreadCount,
     );
   }
 }
@@ -157,6 +162,53 @@ class SubgruposRepository {
       throw Exception(msg);
     }
   }
+
+  /// Actualiza en caliente el nombre o descripción de un subgrupo (IRL-WKS-US-02)
+  /// PUT /nodos/:id/subgrupos/:subgrupo_id
+  Future<Subgrupo> updateSubgrupo({
+    required String nodoId,
+    required String subgrupoId,
+    String? nombre,
+    String? descripcion,
+  }) async {
+    try {
+      final response = await _client.put(
+        '/nodos/$nodoId/subgrupos/$subgrupoId',
+        data: {
+          if (nombre case final String n) 'nombre': n,
+          if (descripcion case final String d) 'descripcion': d,
+        },
+      );
+      final data = response.data as Map<String, dynamic>;
+      if (data['subgrupo'] != null) {
+        return Subgrupo.fromJson(data['subgrupo'] as Map<String, dynamic>);
+      }
+      throw Exception(data['message'] ?? 'Error al actualizar subgrupo');
+    } on DioException catch (e) {
+      final msg = e.response?.data?['message'] ?? 'Error al actualizar subgrupo';
+      throw Exception(msg);
+    }
+  }
+
+  /// Asigna múltiples miembros del nodo al subgrupo (IRL-WKS-US-02)
+  /// POST /nodos/:id/subgrupos/:subgrupo_id/asignar-miembros
+  Future<int> asignarMiembros({
+    required String nodoId,
+    required String subgrupoId,
+    required List<String> userIds,
+  }) async {
+    try {
+      final response = await _client.post(
+        '/nodos/$nodoId/subgrupos/$subgrupoId/asignar-miembros',
+        data: {'user_ids': userIds},
+      );
+      final data = response.data as Map<String, dynamic>;
+      return (data['asignados_count'] as num?)?.toInt() ?? userIds.length;
+    } on DioException catch (e) {
+      final msg = e.response?.data?['message'] ?? 'Error al asignar miembros al subgrupo';
+      throw Exception(msg);
+    }
+  }
 }
 
 class SubgrupoMiembro {
@@ -164,6 +216,8 @@ class SubgrupoMiembro {
   final String name;
   final String email;
   final String? avatarColor;
+  final String? statusText;
+  final String? avatarUrl;
   final DateTime joinedAt;
 
   const SubgrupoMiembro({
@@ -171,6 +225,8 @@ class SubgrupoMiembro {
     required this.name,
     required this.email,
     this.avatarColor,
+    this.statusText,
+    this.avatarUrl,
     required this.joinedAt,
   });
 
@@ -180,6 +236,8 @@ class SubgrupoMiembro {
       name: json['name'] as String? ?? '',
       email: json['email'] as String? ?? '',
       avatarColor: json['avatar_color'] as String?,
+      statusText: json['status_text'] as String?,
+      avatarUrl: json['avatar_url'] as String?,
       joinedAt: json['joined_at'] != null
           ? DateTime.tryParse(json['joined_at'].toString()) ?? DateTime.now()
           : DateTime.now(),

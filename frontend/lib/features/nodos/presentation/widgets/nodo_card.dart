@@ -50,7 +50,27 @@ class NodoCard extends ConsumerWidget {
             ),
             onPressed: () async {
               Navigator.pop(ctx);
-              await ref.read(nodosProvider.notifier).deleteNodo(nodo.id);
+              final success = await ref.read(nodosProvider.notifier).deleteNodo(nodo.id);
+              if (context.mounted) {
+                if (success) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('✅ Nodo "${nodo.nombre}" eliminado exitosamente'),
+                      backgroundColor: const Color(0xFF10B981),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                } else {
+                  final err = ref.read(nodosProvider).errorMessage ?? 'Error al eliminar el nodo';
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('❌ $err'),
+                      backgroundColor: const Color(0xFFEF4444),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              }
             },
             child: const Text('Eliminar', style: TextStyle(fontWeight: FontWeight.bold)),
           ),

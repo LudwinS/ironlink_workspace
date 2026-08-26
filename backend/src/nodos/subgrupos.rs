@@ -28,6 +28,7 @@ pub struct SubgrupoInfo {
     pub created_at: DateTime<Utc>,
     pub miembros_count: i64,
     pub is_member: bool,
+    pub unread_count: i64,
 }
 
 #[derive(Serialize)]
@@ -46,6 +47,8 @@ pub struct SubgrupoMiembroInfo {
     pub name: String,
     pub email: String,
     pub avatar_color: Option<String>,
+    pub status_text: Option<String>,
+    pub avatar_url: Option<String>,
     pub joined_at: DateTime<Utc>,
 }
 
@@ -183,6 +186,7 @@ pub async fn create_subgrupo(
                         created_at,
                         miembros_count: 1,
                         is_member: true,
+                        unread_count: 0,
                     }),
                     subgrupos: None,
                 }),
@@ -243,13 +247,23 @@ pub async fn list_subgrupos(
             s.creado_por, 
             s.created_at,
             (SELECT COUNT(*) FROM subgrupo_miembros sm WHERE sm.subgrupo_id = s.id) AS miembros_count,
-            EXISTS(SELECT 1 FROM subgrupo_miembros sm WHERE sm.subgrupo_id = s.id AND sm.user_id = $2) AS is_member
+            EXISTS(SELECT 1 FROM subgrupo_miembros sm WHERE sm.subgrupo_id = s.id AND sm.user_id = $2) AS is_member,
+            (
+                SELECT COUNT(*)
+                FROM mensajes m
+                WHERE m.subgrupo_id = s.id
+                  AND m.user_id != $2
+                  AND m.created_at > COALESCE(
+                      (SELECT sm.last_read_at FROM subgrupo_miembros sm WHERE sm.subgrupo_id = s.id AND sm.user_id = $2),
+                      '1970-01-01'::timestamptz
+                  )
+            ) AS unread_count
         FROM subgrupos s
         WHERE s.nodo_id = $1 AND s.is_archived = FALSE
         ORDER BY s.created_at ASC
     ";
 
-    let rows = sqlx::query_as::<_, (Uuid, Uuid, String, Option<String>, bool, Uuid, DateTime<Utc>, i64, bool)>(query)
+    let rows = sqlx::query_as::<_, (Uuid, Uuid, String, Option<String>, bool, Uuid, DateTime<Utc>, i64, bool, i64)>(query)
         .bind(nodo_id)
         .bind(auth_user.user_id)
         .fetch_all(&state.pool)
@@ -259,7 +273,7 @@ pub async fn list_subgrupos(
         Ok(list) => {
             let subgrupos = list
                 .into_iter()
-                .map(|(id, n_id, nom, desc, priv_flag, creador, created_at, count, is_mem)| SubgrupoInfo {
+                .map(|(id, n_id, nom, desc, priv_flag, creador, created_at, count, is_mem, unread)| SubgrupoInfo {
                     id,
                     nodo_id: n_id,
                     nombre: nom,
@@ -269,6 +283,7 @@ pub async fn list_subgrupos(
                     created_at,
                     miembros_count: count,
                     is_member: is_mem,
+                    unread_count: unread,
                 })
                 .collect();
 
@@ -581,8 +596,8 @@ pub async fn list_subgrupo_miembros(
         );
     }
 
-    let rows = sqlx::query_as::<_, (Uuid, String, String, Option<String>, DateTime<Utc>)>(
-        "SELECT u.id, u.name, u.email, u.avatar_color, sm.created_at
+    let rows = sqlx::query_as::<_, (Uuid, String, String, Option<String>, Option<String>, Option<String>, DateTime<Utc>)>(
+        "SELECT u.id, u.name, u.email, u.avatar_color, u.status_text, u.avatar_url, sm.created_at
          FROM subgrupo_miembros sm
          JOIN users u ON sm.user_id = u.id
          WHERE sm.subgrupo_id = $1
@@ -596,11 +611,13 @@ pub async fn list_subgrupo_miembros(
         Ok(list) => {
             let miembros = list
                 .into_iter()
-                .map(|(uid, name, email, color, joined)| SubgrupoMiembroInfo {
+                .map(|(uid, name, email, color, status, url, joined)| SubgrupoMiembroInfo {
                     user_id: uid,
                     name,
                     email,
                     avatar_color: color,
+                    status_text: status,
+                    avatar_url: url,
                     joined_at: joined,
                 })
                 .collect();
@@ -626,4 +643,271 @@ pub async fn list_subgrupo_miembros(
             )
         }
     }
+}
+
+// ─── DTOs de Actualización y Asignación de Miembros (IRL-WKS-US-02) ────────
+
+#[derive(Deserialize)]
+pub struct UpdateSubgrupoDto {
+    pub nombre: Option<String>,
+    pub descripcion: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct AsignarMiembrosDto {
+    pub user_ids: Vec<Uuid>,
+}
+
+#[derive(Serialize)]
+pub struct AsignarMiembrosResponse {
+    pub success: bool,
+    pub message: String,
+    pub asignados_count: usize,
+}
+
+// ─── PUT /nodos/{id}/subgrupos/{subgrupo_id} ──────────────────────────────
+
+pub async fn update_subgrupo(
+    State(state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
+    Path((nodo_id, subgrupo_id)): Path<(Uuid, Uuid)>,
+    Json(payload): Json<UpdateSubgrupoDto>,
+) -> (StatusCode, Json<SubgrupoResponse>) {
+    // 1. Validar que el usuario sea creador del subgrupo, o OWNER/ADMIN del nodo
+    let member_role = sqlx::query_scalar::<_, String>(
+        "SELECT rol FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2"
+    )
+    .bind(nodo_id)
+    .bind(auth_user.user_id)
+    .fetch_optional(&state.pool)
+    .await
+    .unwrap_or(None);
+
+    let sub_creator = sqlx::query_scalar::<_, Uuid>(
+        "SELECT creado_por FROM subgrupos WHERE id = $1 AND nodo_id = $2 AND is_archived = FALSE"
+    )
+    .bind(subgrupo_id)
+    .bind(nodo_id)
+    .fetch_optional(&state.pool)
+    .await
+    .unwrap_or(None);
+
+    let sub_creator_id = match sub_creator {
+        Some(cid) => cid,
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(SubgrupoResponse {
+                    success: false,
+                    message: "El subgrupo no existe o ha sido archivado.".to_string(),
+                    subgrupo: None,
+                    subgrupos: None,
+                }),
+            );
+        }
+    };
+
+    let nodo_creator = sqlx::query_scalar::<_, Uuid>(
+        "SELECT creador_id FROM nodos WHERE id = $1"
+    )
+    .bind(nodo_id)
+    .fetch_optional(&state.pool)
+    .await
+    .unwrap_or(None);
+
+    let can_edit = auth_user.role == "ADMIN"
+        || sub_creator_id == auth_user.user_id
+        || nodo_creator == Some(auth_user.user_id)
+        || member_role.as_deref() == Some("OWNER")
+        || member_role.as_deref() == Some("ADMIN");
+
+    if !can_edit {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(SubgrupoResponse {
+                success: false,
+                message: "No tienes permisos para editar este subgrupo.".to_string(),
+                subgrupo: None,
+                subgrupos: None,
+            }),
+        );
+    }
+
+    let nombre = payload.nombre.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let descripcion = payload.descripcion.as_deref().map(str::trim);
+
+    let update = sqlx::query_as::<_, (Uuid, Uuid, String, Option<String>, bool, Uuid, DateTime<Utc>)>(
+        r#"
+        UPDATE subgrupos
+        SET nombre = COALESCE($1, nombre),
+            descripcion = COALESCE($2, descripcion)
+        WHERE id = $3 AND nodo_id = $4 AND is_archived = FALSE
+        RETURNING id, nodo_id, nombre, descripcion, es_privado, creado_por, created_at
+        "#
+    )
+    .bind(nombre)
+    .bind(descripcion)
+    .bind(subgrupo_id)
+    .bind(nodo_id)
+    .fetch_optional(&state.pool)
+    .await;
+
+    match update {
+        Ok(Some((id, nid, nom, desc, es_priv, creado, cat))) => {
+            let m_count = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM subgrupo_miembros WHERE subgrupo_id = $1"
+            )
+            .bind(id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap_or(0);
+
+            let is_member = sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM subgrupo_miembros WHERE subgrupo_id = $1 AND user_id = $2)"
+            )
+            .bind(id)
+            .bind(auth_user.user_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap_or(false);
+
+            (
+                StatusCode::OK,
+                Json(SubgrupoResponse {
+                    success: true,
+                    message: "Subgrupo actualizado exitosamente.".to_string(),
+                    subgrupo: Some(SubgrupoInfo {
+                        id,
+                        nodo_id: nid,
+                        nombre: nom,
+                        descripcion: desc,
+                        es_privado: es_priv,
+                        creado_por: creado,
+                        created_at: cat,
+                        miembros_count: m_count,
+                        is_member,
+                        unread_count: 0,
+                    }),
+                    subgrupos: None,
+                }),
+            )
+        }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(SubgrupoResponse {
+                success: false,
+                message: "Subgrupo no encontrado.".to_string(),
+                subgrupo: None,
+                subgrupos: None,
+            }),
+        ),
+        Err(e) => {
+            eprintln!("Error al actualizar subgrupo: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(SubgrupoResponse {
+                    success: false,
+                    message: "Error interno al actualizar subgrupo.".to_string(),
+                    subgrupo: None,
+                    subgrupos: None,
+                }),
+            )
+        }
+    }
+}
+
+// ─── POST /nodos/{id}/subgrupos/{subgrupo_id}/asignar-miembros ────────────
+
+pub async fn asignar_miembros_subgrupo(
+    State(state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
+    Path((nodo_id, subgrupo_id)): Path<(Uuid, Uuid)>,
+    Json(payload): Json<AsignarMiembrosDto>,
+) -> (StatusCode, Json<AsignarMiembrosResponse>) {
+    // 1. Validar permisos (creador del subgrupo, OWNER/ADMIN del nodo o Global Admin)
+    let member_role = sqlx::query_scalar::<_, String>(
+        "SELECT rol FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2"
+    )
+    .bind(nodo_id)
+    .bind(auth_user.user_id)
+    .fetch_optional(&state.pool)
+    .await
+    .unwrap_or(None);
+
+    let sub_creator = sqlx::query_scalar::<_, Uuid>(
+        "SELECT creado_por FROM subgrupos WHERE id = $1 AND nodo_id = $2 AND is_archived = FALSE"
+    )
+    .bind(subgrupo_id)
+    .bind(nodo_id)
+    .fetch_optional(&state.pool)
+    .await
+    .unwrap_or(None);
+
+    let sub_creator_id = match sub_creator {
+        Some(cid) => cid,
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(AsignarMiembrosResponse {
+                    success: false,
+                    message: "El subgrupo no existe o está archivado.".to_string(),
+                    asignados_count: 0,
+                }),
+            );
+        }
+    };
+
+    let can_assign = auth_user.role == "ADMIN"
+        || sub_creator_id == auth_user.user_id
+        || member_role.as_deref() == Some("OWNER")
+        || member_role.as_deref() == Some("ADMIN");
+
+    if !can_assign {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(AsignarMiembrosResponse {
+                success: false,
+                message: "No tienes permisos para asignar miembros a este subgrupo.".to_string(),
+                asignados_count: 0,
+            }),
+        );
+    }
+
+    let mut added = 0;
+    for target_user_id in payload.user_ids {
+        // Verificar que el usuario pertenece al nodo
+        let in_nodo = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2)"
+        )
+        .bind(nodo_id)
+        .bind(target_user_id)
+        .fetch_one(&state.pool)
+        .await
+        .unwrap_or(false);
+
+        if in_nodo {
+            let res = sqlx::query(
+                "INSERT INTO subgrupo_miembros (subgrupo_id, user_id, created_at) VALUES ($1, $2, NOW()) ON CONFLICT DO NOTHING"
+            )
+            .bind(subgrupo_id)
+            .bind(target_user_id)
+            .execute(&state.pool)
+            .await;
+
+            if let Ok(r) = res {
+                if r.rows_affected() > 0 {
+                    added += 1;
+                }
+            }
+        }
+    }
+
+    (
+        StatusCode::OK,
+        Json(AsignarMiembrosResponse {
+            success: true,
+            message: format!("Se han asignado {} miembros al subgrupo.", added),
+            asignados_count: added,
+        }),
+    )
 }

@@ -2,15 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/widgets/user_avatar.dart';
 import '../../providers/nodos_provider.dart';
-
+import '../../../iam/providers/profile_provider.dart';
 import '../../../iam/presentation/widgets/profile_dialog.dart';
 
 const _navy950 = AppColors.navy950;
 const _border = AppColors.border;
 const _mint = AppColors.mint;
 const _darkMint = AppColors.darkMint;
-const _cyan = AppColors.cyan;
 const _slate100 = AppColors.slate100;
 const _slate400 = AppColors.slate400;
 
@@ -21,7 +21,7 @@ class TopBar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final username = ref.watch(usernameProvider);
-    final initials = _getInitials(username);
+    final profile = ref.watch(profileProvider).profile;
 
     return Container(
       height: 64,
@@ -81,39 +81,17 @@ class TopBar extends ConsumerWidget {
           InkWell(
             borderRadius: BorderRadius.circular(20),
             onTap: () => ProfileDialog.show(context),
-            child: Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: const LinearGradient(
-                  colors: [_mint, _cyan],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                border: Border.all(color: _border, width: 1.5),
-              ),
-              child: Center(
-                child: Text(
-                  initials,
-                  style: const TextStyle(
-                    color: _navy950,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 13,
-                  ),
-                ),
-              ),
+            child: UserAvatar(
+              avatarUrl: profile?.avatarUrl,
+              avatarColor: profile?.avatarColor,
+              name: profile?.name.isNotEmpty == true ? profile!.name : username,
+              size: 36,
+              showBorder: true,
+              borderColor: _mint,
             ),
           ),
         ],
       ),
     );
-  }
-
-  String _getInitials(String name) {
-    if (name.isEmpty) return 'U';
-    final parts = name.trim().split(' ');
-    if (parts.length == 1) return parts[0][0].toUpperCase();
-    return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
   }
 }

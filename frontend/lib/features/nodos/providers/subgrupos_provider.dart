@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/subgrupos_repository.dart';
 
@@ -33,24 +34,37 @@ class SubgruposState {
 class SubgruposNotifier extends StateNotifier<SubgruposState> {
   final SubgruposRepository _repository;
   final String? _nodoId;
+  Timer? _timer;
 
   SubgruposNotifier(this._repository, this._nodoId) : super(const SubgruposState()) {
     if (_nodoId != null && _nodoId.isNotEmpty) {
       loadSubgrupos();
+      _startPolling();
     }
   }
 
-  Future<void> loadSubgrupos() async {
+  void _startPolling() {
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
+      loadSubgrupos(silent: true);
+    });
+  }
+
+  Future<void> loadSubgrupos({bool silent = false}) async {
     if (_nodoId == null) return;
-    state = state.copyWith(isLoading: true, clearErrors: true);
+    if (!silent && state.subgrupos.isEmpty) {
+      state = state.copyWith(isLoading: true, clearErrors: true);
+    }
     try {
       final list = await _repository.fetchSubgrupos(_nodoId);
       state = state.copyWith(subgrupos: list, isLoading: false);
     } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        errorMessage: e.toString().replaceAll('Exception: ', ''),
-      );
+      if (!silent) {
+        state = state.copyWith(
+          isLoading: false,
+          errorMessage: e.toString().replaceAll('Exception: ', ''),
+        );
+      }
     }
   }
 
@@ -118,6 +132,79 @@ class SubgruposNotifier extends StateNotifier<SubgruposState> {
     }
   }
 
+  /// Edición de nombre y descripción en caliente sin recarga completa (IRL-WKS-US-02)
+  Future<bool> updateSubgrupo({
+    required String subgrupoId,
+    String? nombre,
+    String? descripcion,
+  }) async {
+    if (_nodoId == null) return false;
+    
+    // Optimistic update in place
+    state = state.copyWith(
+      subgrupos: state.subgrupos.map((s) {
+        if (s.id == subgrupoId) {
+          return s.copyWith(
+            nombre: nombre ?? s.nombre,
+            descripcion: descripcion ?? s.descripcion,
+          );
+        }
+        return s;
+      }).toList(),
+      clearErrors: true,
+    );
+
+    try {
+      final updated = await _repository.updateSubgrupo(
+        nodoId: _nodoId,
+        subgrupoId: subgrupoId,
+        nombre: nombre,
+        descripcion: descripcion,
+      );
+      state = state.copyWith(
+        subgrupos: state.subgrupos.map((s) => s.id == subgrupoId ? updated : s).toList(),
+      );
+      return true;
+    } catch (e) {
+      await loadSubgrupos();
+      state = state.copyWith(
+        errorMessage: e.toString().replaceAll('Exception: ', ''),
+      );
+      return false;
+    }
+  }
+
+  /// Asignación masiva de miembros a subgrupo (IRL-WKS-US-02)
+  Future<bool> asignarMiembros({
+    required String subgrupoId,
+    required List<String> userIds,
+  }) async {
+    if (_nodoId == null || userIds.isEmpty) return false;
+    try {
+      final count = await _repository.asignarMiembros(
+        nodoId: _nodoId,
+        subgrupoId: subgrupoId,
+        userIds: userIds,
+      );
+      // Actualizar contador en caliente
+      state = state.copyWith(
+        subgrupos: state.subgrupos.map((s) {
+          if (s.id == subgrupoId) {
+            return s.copyWith(miembrosCount: s.miembrosCount + count);
+          }
+          return s;
+        }).toList(),
+      );
+      await loadSubgrupos();
+      return true;
+    } catch (e) {
+      state = state.copyWith(
+        errorMessage: e.toString().replaceAll('Exception: ', ''),
+      );
+      return false;
+    }
+  }
+
   Future<bool> deleteSubgrupo(String subgrupoId) async {
     if (_nodoId == null) return false;
     try {
@@ -131,9 +218,15 @@ class SubgruposNotifier extends StateNotifier<SubgruposState> {
       return false;
     }
   }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
 }
 
-final subgruposProvider = StateNotifierProvider.family<SubgruposNotifier, SubgruposState, String>((ref, nodoId) {
+final subgruposProvider = StateNotifierProvider.autoDispose.family<SubgruposNotifier, SubgruposState, String>((ref, nodoId) {
   final repo = ref.watch(subgruposRepositoryProvider);
   return SubgruposNotifier(repo, nodoId);
 });

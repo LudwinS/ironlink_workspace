@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/widgets/user_avatar.dart';
 import '../../data/nodos_repository.dart';
 import '../../providers/nodos_provider.dart';
 
@@ -16,7 +17,6 @@ const _cyan = AppColors.cyan;
 const _slate100 = AppColors.slate100;
 const _slate400 = AppColors.slate400;
 const _slate500 = AppColors.slate500;
-const _slate600 = AppColors.slate600;
 
 class NodoDetailsDialog extends ConsumerStatefulWidget {
   final Nodo nodo;
@@ -527,27 +527,13 @@ class _NodoDetailsDialogState extends ConsumerState<NodoDetailsDialog> {
         return ListTile(
           dense: true,
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-          leading: Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                colors: isSelf ? [_mint, _cyan] : [_slate500, _slate600],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-            ),
-            child: Center(
-              child: Text(
-                member.name.isNotEmpty ? member.name[0].toUpperCase() : 'U',
-                style: TextStyle(
-                  color: isSelf ? _navy950 : _slate100,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                ),
-              ),
-            ),
+          leading: UserAvatar(
+            avatarUrl: member.avatarUrl,
+            avatarColor: member.avatarColor,
+            name: member.name,
+            size: 34,
+            showBorder: isSelf,
+            borderColor: _mint,
           ),
           title: Text(
             nameLabel,
@@ -558,9 +544,11 @@ class _NodoDetailsDialogState extends ConsumerState<NodoDetailsDialog> {
             ),
           ),
           subtitle: Text(
-            member.email,
-            style: const TextStyle(
-              color: _slate500,
+            member.statusText?.isNotEmpty == true
+                ? '${member.statusText} • ${member.email}'
+                : member.email,
+            style: TextStyle(
+              color: member.statusText?.isNotEmpty == true ? _cyan : _slate500,
               fontSize: 11,
             ),
           ),

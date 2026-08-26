@@ -89,6 +89,9 @@ class ChatMessagesNotifier extends StateNotifier<ChatMessagesState> {
       // Evitar sobreescribir si ya cambiamos de nodo o subgrupo
       if (_activeNodoId == nodoId && _activeSubgrupoId == subgrupoId) {
         state = state.copyWith(mensajes: list, loading: false, error: null);
+        if (subgrupoId == null) {
+          _ref.read(nodosProvider.notifier).clearUnreadCount(nodoId);
+        }
       }
     } catch (e) {
       if (_activeNodoId == nodoId && _activeSubgrupoId == subgrupoId && !silent) {

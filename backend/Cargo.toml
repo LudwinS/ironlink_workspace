@@ -18,3 +18,5 @@ jsonwebtoken = "9"
 lettre = { version = "0.11", features = ["tokio1-native-tls", "builder", "smtp-transport"] }
 rand = "0.8"
 hex = "0.4"
+base64 = "0.22"
+

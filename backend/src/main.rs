@@ -89,17 +89,27 @@ async fn main() {
         .route("/nodos/{id}/baneos/{user_id}", delete(nodos::service::unban_miembro))
         .route("/nodos/{id}/mensajes", post(nodos::service::send_mensaje))
         .route("/nodos/{id}/mensajes", get(nodos::service::list_mensajes))
-        // ── Sprint 2: IRL-IAM-US-05 (Perfil de Usuario) ──
+        // ── Sprint 2: IRL-WKS-US-03 (Contador y Limpieza de Mensajes No Leídos) ──
+        .route("/nodos/{id}/unread-count", get(nodos::service::get_unread_count))
+        .route("/api/node/{id}/unread-count", get(nodos::service::get_unread_count))
+        .route("/nodos/{id}/read", post(nodos::service::mark_as_read))
+        .route("/api/node/{id}/check_read_status", post(nodos::service::mark_as_read))
+        // ── Sprint 2: IRL-IAM-US-05 (Perfil de Usuario y Upload de Avatar con validación) ──
         .route("/users/me", get(auth::service::get_user_profile))
         .route("/users/me", put(auth::service::update_user_profile))
+        .route("/users/me/avatar", post(auth::service::upload_avatar))
+        .route("/api/users/me/avatar", post(auth::service::upload_avatar))
         .route("/users/me/password", put(auth::service::change_user_password))
-        // ── Sprint 2: IRL-WKS-US-02 (Subgrupos de Nodos) ──
+        // ── Sprint 2: IRL-WKS-US-02 (Subgrupos: Creación, Edición en Caliente y Asignación) ──
         .route("/nodos/{id}/subgrupos", post(nodos::subgrupos::create_subgrupo))
         .route("/nodos/{id}/subgrupos", get(nodos::subgrupos::list_subgrupos))
+        .route("/nodos/{id}/subgrupos/{subgrupo_id}", put(nodos::subgrupos::update_subgrupo))
         .route("/nodos/{id}/subgrupos/{subgrupo_id}/join", post(nodos::subgrupos::join_subgrupo))
         .route("/nodos/{id}/subgrupos/{subgrupo_id}/leave", post(nodos::subgrupos::leave_subgrupo))
         .route("/nodos/{id}/subgrupos/{subgrupo_id}", delete(nodos::subgrupos::delete_subgrupo))
         .route("/nodos/{id}/subgrupos/{subgrupo_id}/miembros", get(nodos::subgrupos::list_subgrupo_miembros))
+        .route("/nodos/{id}/subgrupos/{subgrupo_id}/miembros", post(nodos::subgrupos::asignar_miembros_subgrupo))
+        .route("/nodos/{id}/subgrupos/{subgrupo_id}/asignar-miembros", post(nodos::subgrupos::asignar_miembros_subgrupo))
         // ── Sprint 2: IRL-WKS-US-04 (Reuniones Programadas) ──
         .route("/nodos/{id}/reuniones", post(nodos::reuniones::create_reunion))
         .route("/nodos/{id}/reuniones", get(nodos::reuniones::list_reuniones))

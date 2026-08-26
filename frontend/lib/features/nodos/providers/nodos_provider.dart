@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/nodos_repository.dart';
 import '../../iam/providers/auth_provider.dart';
+import 'chat_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Estado del módulo Nodos
@@ -51,11 +52,14 @@ class NodosState {
 
 class NodosNotifier extends StateNotifier<NodosState> {
   final NodosRepository _repository;
+  final Ref _ref;
   Timer? _pollingTimer;
 
-  NodosNotifier(this._repository) : super(const NodosState());
+  NodosNotifier(this._repository, this._ref) : super(const NodosState()) {
+    startPolling();
+  }
 
-  /// Carga los nodos del usuario.
+  /// Carga los nodos del usuario y actualiza sus mensajes no leídos.
   Future<void> loadNodos({bool silent = false}) async {
     if (!silent) {
       state = state.copyWith(status: NodosStatus.loading);
@@ -63,6 +67,7 @@ class NodosNotifier extends StateNotifier<NodosState> {
     try {
       final nodos = await _repository.fetchNodos();
       state = state.copyWith(status: NodosStatus.loaded, nodos: nodos);
+      fetchUnreadCounts();
     } catch (e) {
       if (!silent) {
         state = state.copyWith(
@@ -73,10 +78,32 @@ class NodosNotifier extends StateNotifier<NodosState> {
     }
   }
 
+  /// Consulta los mensajes no leídos para cada nodo (IRL-WKS-US-03)
+  Future<void> fetchUnreadCounts() async {
+    final counts = <String, int>{};
+    for (final nodo in state.nodos) {
+      try {
+        final c = await _repository.getUnreadCount(nodo.id);
+        counts[nodo.id] = c;
+      } catch (_) {}
+    }
+    _ref.read(unreadCountsProvider.notifier).state = counts;
+  }
+
+  /// Limpia automáticamente el badge de no leídos de un nodo al sincronizar o abrir (IRL-WKS-US-03)
+  Future<void> clearUnreadCount(String nodoId) async {
+    final current = Map<String, int>.from(_ref.read(unreadCountsProvider));
+    if ((current[nodoId] ?? 0) > 0) {
+      current[nodoId] = 0;
+      _ref.read(unreadCountsProvider.notifier).state = current;
+    }
+    await _repository.markAsRead(nodoId);
+  }
+
   /// Inicia el bucle de actualización periódica.
   void startPolling() {
     _pollingTimer?.cancel();
-    _pollingTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
       loadNodos(silent: true);
     });
   }
@@ -146,9 +173,8 @@ class NodosNotifier extends StateNotifier<NodosState> {
   Future<bool> deleteNodo(String id) async {
     state = state.copyWith(status: NodosStatus.loading);
     try {
-      // Buscar el nodo en el estado local para obtener su nombre
-      final nodo = state.nodos.firstWhere((n) => n.id == id);
-      final nombre = nodo.nombre;
+      final matching = state.nodos.where((n) => n.id == id).toList();
+      final nombre = matching.isNotEmpty ? matching.first.nombre : 'Nodo';
 
       await _repository.deleteNodo(id);
       
@@ -158,6 +184,11 @@ class NodosNotifier extends StateNotifier<NodosState> {
         nodos: updatedNodos,
         successMessage: 'Nodo "$nombre" eliminado exitosamente',
       );
+
+      if (_ref.read(selectedNodoProvider)?.id == id) {
+        _ref.read(selectedNodoProvider.notifier).state = null;
+        _ref.read(selectedSubgrupoProvider.notifier).state = null;
+      }
       return true;
     } catch (e) {
       state = state.copyWith(
@@ -204,13 +235,16 @@ class NodosNotifier extends StateNotifier<NodosState> {
 // Providers de Riverpod
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Provider reactivo para almacenar mapa de conteos no leídos por ID de nodo (IRL-WKS-US-03)
+final unreadCountsProvider = StateProvider<Map<String, int>>((ref) => {});
+
 final nodosRepositoryProvider =
     Provider.autoDispose<NodosRepository>((ref) => NodosRepository());
 
 final nodosProvider =
     StateNotifierProvider.autoDispose<NodosNotifier, NodosState>((ref) {
   final repo = ref.watch(nodosRepositoryProvider);
-  return NodosNotifier(repo);
+  return NodosNotifier(repo, ref);
 });
 
 /// Provider para el rol del usuario (leído de authProvider).

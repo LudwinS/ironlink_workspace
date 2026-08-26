@@ -33,7 +33,9 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>IronLink requiere acceso al micrófono para llamadas y salas de voz.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>IronLink requiere acceso a la cámara para videoconferencias.</string>
+	<string>IronLink requiere acceso a la cámara para tomar fotos de perfil y videoconferencias.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>IronLink requiere acceso a tus fotos para seleccionar tu imagen de perfil.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>IronLink requiere acceso a dispositivos de audio Bluetooth como AirPods.</string>
 </dict>

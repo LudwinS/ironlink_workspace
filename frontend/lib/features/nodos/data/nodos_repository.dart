@@ -305,6 +305,29 @@ class NodosRepository {
     }
   }
 
+  /// Obtiene el conteo de mensajes no leídos para un nodo (IRL-WKS-US-03)
+  /// GET /nodos/:id/unread-count
+  Future<int> getUnreadCount(String nodoId) async {
+    try {
+      final response = await _client.get('/nodos/$nodoId/unread-count');
+      final data = response.data;
+      if (data is Map<String, dynamic>) {
+        return (data['unread_count'] as num?)?.toInt() ?? 0;
+      }
+      return 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// Registra la última lectura y limpia el badge de no leídos (IRL-WKS-US-03)
+  /// POST /nodos/:id/read
+  Future<void> markAsRead(String nodoId) async {
+    try {
+      await _client.post('/nodos/$nodoId/read');
+    } catch (_) {}
+  }
+
   /// Extrae un mensaje legible de una respuesta de error Dio.
   String _extractErrorMessage(DioException e, String fallback) {
     final responseData = e.response?.data;
@@ -323,12 +346,18 @@ class NodoMiembro {
   final String name;
   final String email;
   final String rol;
+  final String? avatarColor;
+  final String? statusText;
+  final String? avatarUrl;
 
   const NodoMiembro({
     required this.userId,
     required this.name,
     required this.email,
     required this.rol,
+    this.avatarColor,
+    this.statusText,
+    this.avatarUrl,
   });
 
   factory NodoMiembro.fromJson(Map<String, dynamic> json) {
@@ -337,6 +366,9 @@ class NodoMiembro {
       name: json['name'] as String? ?? '',
       email: json['email'] as String? ?? '',
       rol: json['rol'] as String? ?? 'MEMBER',
+      avatarColor: json['avatar_color'] as String?,
+      statusText: json['status_text'] as String?,
+      avatarUrl: json['avatar_url'] as String?,
     );
   }
 }
@@ -377,6 +409,9 @@ class Mensaje {
   final String contenido;
   final DateTime createdAt;
   final String? subgrupoId;
+  final String? avatarUrl;
+  final String? avatarColor;
+  final String? statusText;
 
   const Mensaje({
     required this.id,
@@ -386,6 +421,9 @@ class Mensaje {
     required this.contenido,
     required this.createdAt,
     this.subgrupoId,
+    this.avatarUrl,
+    this.avatarColor,
+    this.statusText,
   });
 
   factory Mensaje.fromJson(Map<String, dynamic> json) {
@@ -399,6 +437,9 @@ class Mensaje {
           ? DateTime.tryParse(json['created_at'].toString()) ?? DateTime.now()
           : DateTime.now(),
       subgrupoId: json['subgrupo_id'] as String?,
+      avatarUrl: json['avatar_url'] as String?,
+      avatarColor: json['avatar_color'] as String?,
+      statusText: json['status_text'] as String?,
     );
   }
 }

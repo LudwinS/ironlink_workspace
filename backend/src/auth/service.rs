@@ -293,11 +293,12 @@ pub async fn login(
     State(state): State<AppState>,
     Json(payload): Json<LoginDto>,
 ) -> (StatusCode, Json<LoginResponse>) {
-    // 1. Buscar al usuario por email
+    // 1. Normalizar email y buscar al usuario
+    let email_normalized = payload.email.trim().to_lowercase();
     let user = sqlx::query_as::<_, (Uuid, String, String, String, String, i32, Option<chrono::DateTime<chrono::Utc>>, String)>(
-        "SELECT id, name, email, password, rol::TEXT, COALESCE(intentos_fallidos, 0), bloqueado_hasta, estado::TEXT FROM users WHERE email = $1"
+        "SELECT id, name, email, password, rol::TEXT, COALESCE(intentos_fallidos, 0), bloqueado_hasta, estado::TEXT FROM users WHERE LOWER(TRIM(email)) = $1"
     )
-    .bind(&payload.email)
+    .bind(&email_normalized)
     .fetch_optional(&state.pool)
     .await;
 
@@ -693,6 +694,9 @@ pub async fn update_user_profile(
     axum::Extension(auth_user): axum::Extension<AuthUser>,
     Json(payload): Json<UpdateProfileDto>,
 ) -> (StatusCode, Json<ProfileResponse>) {
+    let should_update_avatar = payload.avatar_url.is_some();
+    let avatar_val = payload.avatar_url.as_deref().filter(|s| !s.trim().is_empty());
+
     let result = sqlx::query(
         "UPDATE users 
          SET name = COALESCE($1, name),
@@ -700,16 +704,17 @@ pub async fn update_user_profile(
              bio = COALESCE($3, bio),
              avatar_color = COALESCE($4, avatar_color),
              status_text = COALESCE($5, status_text),
-             avatar_url = COALESCE($6, avatar_url),
+             avatar_url = CASE WHEN $6::boolean THEN $7 ELSE avatar_url END,
              updated_at = NOW()
-         WHERE id = $7"
+         WHERE id = $8"
     )
     .bind(payload.name.as_deref().map(str::trim).filter(|s| !s.is_empty()))
     .bind(payload.telefono.as_deref().map(str::trim).filter(|s| !s.is_empty()))
     .bind(payload.bio.as_deref())
     .bind(payload.avatar_color.as_deref().map(str::trim).filter(|s| !s.is_empty()))
     .bind(payload.status_text.as_deref())
-    .bind(payload.avatar_url.as_deref())
+    .bind(should_update_avatar)
+    .bind(avatar_val)
     .bind(auth_user.user_id)
     .execute(&state.pool)
     .await;
@@ -788,7 +793,10 @@ pub async fn change_user_password(
         }
     };
 
-    if Argon2::default().verify_password(payload.current_password.as_bytes(), &parsed_hash).is_err() {
+    let current_pass = payload.current_password.trim();
+    let new_pass = payload.new_password.trim();
+
+    if Argon2::default().verify_password(current_pass.as_bytes(), &parsed_hash).is_err() {
         return (
             StatusCode::UNAUTHORIZED,
             Json(ApiResponse {
@@ -800,7 +808,7 @@ pub async fn change_user_password(
     }
 
     // 3. Validar que la nueva contraseña sea diferente a la actual
-    if payload.current_password == payload.new_password {
+    if current_pass == new_pass {
         let mut field_errors = HashMap::new();
         field_errors.insert("new_password".to_string(), "La nueva contraseña debe ser diferente a la contraseña actual.".to_string());
         return (
@@ -814,7 +822,7 @@ pub async fn change_user_password(
     }
 
     // 4. Validar política de seguridad de la nueva contraseña (longitud y complejidad)
-    let field_errors = validate_password_field(&payload.new_password, "new_password");
+    let field_errors = validate_password_field(new_pass, "new_password");
     if !field_errors.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -828,7 +836,7 @@ pub async fn change_user_password(
 
     // 5. Hashear nueva contraseña
     let salt = SaltString::generate(&mut OsRng);
-    let new_hash = match Argon2::default().hash_password(payload.new_password.as_bytes(), &salt) {
+    let new_hash = match Argon2::default().hash_password(new_pass.as_bytes(), &salt) {
         Ok(h) => h.to_string(),
         Err(_) => {
             return (
@@ -842,12 +850,14 @@ pub async fn change_user_password(
         }
     };
 
-    // 5. Guardar en DB
-    if let Err(e) = sqlx::query("UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2")
-        .bind(&new_hash)
-        .bind(auth_user.user_id)
-        .execute(&state.pool)
-        .await
+    // 6. Guardar en DB y restablecer intentos fallidos y bloqueos
+    if let Err(e) = sqlx::query(
+        "UPDATE users SET password = $1, intentos_fallidos = 0, bloqueado_hasta = NULL, updated_at = NOW() WHERE id = $2"
+    )
+    .bind(&new_hash)
+    .bind(auth_user.user_id)
+    .execute(&state.pool)
+    .await
     {
         eprintln!("Error al actualizar contraseña: {}", e);
         return (
@@ -868,4 +878,156 @@ pub async fn change_user_password(
             field_errors: None,
         }),
     )
+}
+
+// ─── POST /users/me/avatar ────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct UploadAvatarDto {
+    pub avatar_data: String,
+    pub content_type: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct UploadAvatarResponse {
+    pub success: bool,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+}
+
+pub async fn upload_avatar(
+    State(state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
+    Json(payload): Json<UploadAvatarDto>,
+) -> (StatusCode, Json<UploadAvatarResponse>) {
+    let raw_data = payload.avatar_data.trim();
+    if raw_data.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(UploadAvatarResponse {
+                success: false,
+                message: "No se proporcionaron datos de imagen para el avatar.".to_string(),
+                avatar_url: None,
+            }),
+        );
+    }
+
+    // 1. Extraer data base64 si viene con prefijo Data URI o directo
+    let (mime_detected, base64_str) = if raw_data.starts_with("data:") {
+        let parts: Vec<&str> = raw_data.splitn(2, ',').collect();
+        if parts.len() != 2 {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(UploadAvatarResponse {
+                    success: false,
+                    message: "Formato Data URI inválido.".to_string(),
+                    avatar_url: None,
+                }),
+            );
+        }
+        let header = parts[0];
+        let mime = if header.contains("image/jpeg") || header.contains("image/jpg") {
+            "image/jpeg"
+        } else if header.contains("image/png") {
+            "image/png"
+        } else if header.contains("image/webp") {
+            "image/webp"
+        } else {
+            "unknown"
+        };
+        (mime, parts[1])
+    } else {
+        let mime = payload.content_type.as_deref().unwrap_or("image/jpeg");
+        (mime, raw_data)
+    };
+
+    // 2. Decodificar Base64
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+    let clean_b64: String = base64_str.chars().filter(|c| !c.is_whitespace()).collect();
+    let bytes = match BASE64.decode(&clean_b64) {
+        Ok(b) => b,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(UploadAvatarResponse {
+                    success: false,
+                    message: "La imagen contiene una codificación Base64 inválida.".to_string(),
+                    avatar_url: None,
+                }),
+            );
+        }
+    };
+
+    // 3. Validación de tamaño máximo (Escenario 2: 2 MB = 2,097,152 bytes)
+    const MAX_SIZE_BYTES: usize = 2 * 1024 * 1024;
+    if bytes.len() > MAX_SIZE_BYTES {
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(UploadAvatarResponse {
+                success: false,
+                message: "La imagen excede el tamaño máximo permitido de 2 MB.".to_string(),
+                avatar_url: None,
+            }),
+        );
+    }
+
+    // 4. Validación de formato permitido (Escenario 2b: JPG, PNG, WEBP) mediante Magic Bytes
+    let is_jpeg = bytes.len() >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF;
+    let is_png = bytes.len() >= 4 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47;
+    let is_webp = bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP";
+
+    if !is_jpeg && !is_png && !is_webp && mime_detected != "image/jpeg" && mime_detected != "image/png" && mime_detected != "image/webp" {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(UploadAvatarResponse {
+                success: false,
+                message: "Formato no permitido. Solo se admiten imágenes JPG, PNG y WEBP.".to_string(),
+                avatar_url: None,
+            }),
+        );
+    }
+
+    // 5. Normalizar el Data URI final para almacenamiento en PostgreSQL
+    let effective_mime = if is_png {
+        "image/png"
+    } else if is_webp {
+        "image/webp"
+    } else {
+        "image/jpeg"
+    };
+    let final_avatar_url = format!("data:{};base64,{}", effective_mime, clean_b64);
+
+    // 6. Guardar en users
+    let result = sqlx::query(
+        "UPDATE users SET avatar_url = $1, updated_at = NOW() WHERE id = $2"
+    )
+    .bind(&final_avatar_url)
+    .bind(auth_user.user_id)
+    .execute(&state.pool)
+    .await;
+
+    match result {
+        Ok(_) => {
+            (
+                StatusCode::OK,
+                Json(UploadAvatarResponse {
+                    success: true,
+                    message: "Avatar actualizado exitosamente.".to_string(),
+                    avatar_url: Some(final_avatar_url),
+                }),
+            )
+        }
+        Err(e) => {
+            eprintln!("Error al actualizar avatar en DB: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(UploadAvatarResponse {
+                    success: false,
+                    message: "Error interno al guardar el avatar.".to_string(),
+                    avatar_url: None,
+                }),
+            )
+        }
+    }
 }

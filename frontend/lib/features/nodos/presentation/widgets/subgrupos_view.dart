@@ -5,6 +5,8 @@ import '../../data/subgrupos_repository.dart';
 import '../../providers/subgrupos_provider.dart';
 import '../../providers/chat_provider.dart';
 import 'create_subgrupo_dialog.dart';
+import 'edit_subgrupo_dialog.dart';
+import 'assign_members_dialog.dart';
 
 const _navy950 = AppColors.navy950;
 const _navy900 = AppColors.navy900;
@@ -242,6 +244,24 @@ class _SubgrupoCard extends ConsumerWidget {
                             ),
                           ),
                         ),
+                        if (sub.unreadCount > 0) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEF4444),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              '+${sub.unreadCount}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                     if (sub.descripcion != null && sub.descripcion!.isNotEmpty) ...[
@@ -290,6 +310,27 @@ class _SubgrupoCard extends ConsumerWidget {
                     onPressed: handleOpenChat,
                   ),
                   const SizedBox(width: 8),
+                  // Asignar Miembros (Formulario modal multicheckbox)
+                  IconButton(
+                    icon: const Icon(Icons.group_add_rounded, color: _cyan, size: 19),
+                    tooltip: 'Asignar miembros al subgrupo',
+                    onPressed: () => AssignMembersDialog.show(
+                      context,
+                      nodoId: nodoId,
+                      subgrupo: sub,
+                    ),
+                  ),
+                  // Editar Subgrupo en caliente
+                  IconButton(
+                    icon: const Icon(Icons.edit_outlined, color: _slate400, size: 19),
+                    tooltip: 'Editar nombre y descripción en caliente',
+                    onPressed: () => EditSubgrupoDialog.show(
+                      context,
+                      nodoId: nodoId,
+                      subgrupo: sub,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
                   // Unirse / Salir
                   OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(

@@ -1,6 +1,13 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/image_compress_helper.dart';
+import '../../../../core/widgets/user_avatar.dart';
+import 'camera_capture_dialog.dart';
 import '../../providers/profile_provider.dart';
 
 const _navy950 = AppColors.navy950;
@@ -34,6 +41,8 @@ class _ProfileDialogState extends ConsumerState<ProfileDialog> {
   late TextEditingController _bioCtrl;
   late TextEditingController _statusCtrl;
   String _selectedColor = '#00E5FF';
+  String? _customAvatarUrl;
+  bool _isCompressingImage = false;
   bool _initialized = false;
 
   // Password change controllers
@@ -62,6 +71,7 @@ class _ProfileDialogState extends ConsumerState<ProfileDialog> {
     '🔴 Ocupado',
     '📚 Estudiando',
     '⚡ Desarrollando en IronLink',
+    '☕ Tomando un café',
   ];
 
   @override
@@ -93,6 +103,7 @@ class _ProfileDialogState extends ConsumerState<ProfileDialog> {
       _bioCtrl.text = profile.bio;
       _statusCtrl.text = profile.statusText;
       _selectedColor = profile.avatarColor.isNotEmpty ? profile.avatarColor : '#00E5FF';
+      _customAvatarUrl = profile.avatarUrl;
       _initialized = true;
     }
   }
@@ -117,6 +128,199 @@ class _ProfileDialogState extends ConsumerState<ProfileDialog> {
     );
   }
 
+  Future<void> _showAvatarOptionsModal() async {
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: _navy900,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: _slate500,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Foto de Perfil',
+                style: TextStyle(
+                  color: _slate100,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 16),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: _cyan.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.camera_alt_rounded, color: _cyan),
+                ),
+                title: const Text('Tomar foto con la cámara', style: TextStyle(color: _slate100, fontWeight: FontWeight.w600)),
+                subtitle: const Text('Captura una nueva imagen con tu cámara', style: TextStyle(color: _slate500, fontSize: 12)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _processImageSource(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: _mint.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.photo_library_rounded, color: _mint),
+                ),
+                title: const Text('Elegir de la galería o archivos', style: TextStyle(color: _slate100, fontWeight: FontWeight.w600)),
+                subtitle: const Text('Formatos admitidos: JPG, PNG, WEBP (< 2 MB)', style: TextStyle(color: _slate500, fontSize: 12)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _processImageSource(ImageSource.gallery);
+                },
+              ),
+              if (_customAvatarUrl != null)
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEF4444).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.delete_outline_rounded, color: Color(0xFFEF4444)),
+                  ),
+                  title: const Text('Eliminar foto actual', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.w600)),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    setState(() {
+                      _customAvatarUrl = "";
+                    });
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _processImageSource(ImageSource source) async {
+    try {
+      Uint8List? rawBytes;
+      String? extensionName;
+
+      if (source == ImageSource.camera) {
+        if (!kIsWeb && Platform.isMacOS) {
+          rawBytes = await CameraCaptureDialog.show(context);
+        } else {
+          final picker = ImagePicker();
+          final picked = await picker.pickImage(
+            source: ImageSource.camera,
+            imageQuality: 85,
+            maxWidth: 1024,
+            maxHeight: 1024,
+          );
+          if (picked != null) {
+            rawBytes = await picked.readAsBytes();
+          }
+        }
+        extensionName = 'jpg';
+        if (rawBytes == null) {
+          return;
+        }
+      } else {
+        try {
+          final picker = ImagePicker();
+          final picked = await picker.pickImage(
+            source: source,
+            imageQuality: 85,
+            maxWidth: 1024,
+            maxHeight: 1024,
+          );
+          if (picked != null) {
+            rawBytes = await picked.readAsBytes();
+            extensionName = picked.name.split('.').last.toLowerCase();
+          }
+        } catch (pickerErr) {
+          // Fallback en caso de plataforma desktop
+          final result = await FilePicker.pickFiles(
+            type: FileType.image,
+            allowMultiple: false,
+            withData: true,
+          );
+          if (result != null && result.files.isNotEmpty) {
+            final f = result.files.first;
+            rawBytes = f.bytes;
+            if (rawBytes == null && f.path != null && !kIsWeb) {
+              rawBytes = await File(f.path!).readAsBytes();
+            }
+            extensionName = f.extension?.toLowerCase();
+          }
+        }
+      }
+
+      if (rawBytes == null || rawBytes.isEmpty) return;
+
+      // Escenario 2b: Validación de formatos de imagen permitidos
+      if (extensionName != null &&
+          extensionName.isNotEmpty &&
+          !['jpg', 'jpeg', 'png', 'webp'].contains(extensionName)) {
+        _showError('⚠️ Formato no permitido. Solo se admiten imágenes JPG, JPEG, PNG y WEBP.');
+        return;
+      }
+
+      // Escenario 2 & Alerta en cliente si la imagen supera los 2 MB
+      final sizeBytes = rawBytes.lengthInBytes;
+      if (sizeBytes > 2 * 1024 * 1024 && mounted) {
+        final sizeMB = (sizeBytes / (1024 * 1024)).toStringAsFixed(2);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('⚠️ La foto pesa $sizeMB MB (supera 2 MB). Se comprimirá automáticamente a < 2 MB.'),
+            backgroundColor: const Color(0xFFF59E0B),
+            duration: const Duration(seconds: 4),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+
+      setState(() => _isCompressingImage = true);
+      final compressedDataUri = await ImageCompressHelper.processAndCompressImage(rawBytes);
+      setState(() => _isCompressingImage = false);
+
+      if (compressedDataUri != null) {
+        setState(() {
+          _customAvatarUrl = compressedDataUri;
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('📸 Foto de perfil optimizada y lista (< 2 MB)'),
+              backgroundColor: Color(0xFF10B981),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      } else {
+        _showError('No se pudo procesar la imagen seleccionada.');
+      }
+    } catch (e) {
+      setState(() => _isCompressingImage = false);
+      _showError('Error al procesar imagen: $e');
+    }
+  }
+
   Future<void> _saveProfile() async {
     if (!_formKey.currentState!.validate()) return;
     
@@ -126,6 +330,7 @@ class _ProfileDialogState extends ConsumerState<ProfileDialog> {
       bio: _bioCtrl.text.trim(),
       avatarColor: _selectedColor,
       statusText: _statusCtrl.text.trim(),
+      avatarUrl: _customAvatarUrl,
     );
 
     if (success && mounted) {
@@ -271,24 +476,106 @@ class _ProfileDialogState extends ConsumerState<ProfileDialog> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Avatar & Role preview
+                            // Avatar & Role preview con Foto Personalizada y Compresión
                             Center(
                               child: Column(
                                 children: [
-                                  CircleAvatar(
-                                    radius: 36,
-                                    backgroundColor: _parseColor(_selectedColor),
-                                    child: Text(
-                                      (_nameCtrl.text.isNotEmpty
-                                              ? _nameCtrl.text[0]
-                                              : (profile?.name.isNotEmpty == true ? profile!.name[0] : 'U'))
-                                          .toUpperCase(),
-                                      style: const TextStyle(
-                                        color: _navy950,
-                                        fontSize: 28,
-                                        fontWeight: FontWeight.w800,
+                                  Stack(
+                                    alignment: Alignment.bottomRight,
+                                    children: [
+                                      UserAvatar(
+                                        avatarUrl: _customAvatarUrl,
+                                        avatarColor: _selectedColor,
+                                        name: _nameCtrl.text.isNotEmpty
+                                            ? _nameCtrl.text
+                                            : (profile?.name.isNotEmpty == true ? profile!.name : 'Usuario'),
+                                        size: 78,
+                                        showBorder: true,
+                                        borderColor: _cyan,
+                                        borderWidth: 2.5,
                                       ),
-                                    ),
+                                      if (_isCompressingImage)
+                                        Positioned.fill(
+                                          child: Container(
+                                            decoration: const BoxDecoration(
+                                              color: Colors.black54,
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: const Center(
+                                              child: SizedBox(
+                                                width: 24,
+                                                height: 24,
+                                                child: CircularProgressIndicator(strokeWidth: 2, color: _cyan),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      Positioned(
+                                        bottom: -2,
+                                        right: -2,
+                                        child: InkWell(
+                                          onTap: _isCompressingImage ? null : _showAvatarOptionsModal,
+                                          borderRadius: BorderRadius.circular(16),
+                                          child: Container(
+                                            padding: const EdgeInsets.all(6),
+                                            decoration: BoxDecoration(
+                                              color: _cyan,
+                                              shape: BoxShape.circle,
+                                              border: Border.all(color: _navy900, width: 2),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.black.withValues(alpha: 0.35),
+                                                  blurRadius: 4,
+                                                ),
+                                              ],
+                                            ),
+                                            child: const Icon(
+                                              Icons.camera_alt_rounded,
+                                              color: _navy950,
+                                              size: 14,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      TextButton.icon(
+                                        style: TextButton.styleFrom(
+                                          foregroundColor: _cyan,
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                          minimumSize: Size.zero,
+                                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                        ),
+                                        icon: const Icon(Icons.add_a_photo_rounded, size: 14),
+                                        label: Text(
+                                          _customAvatarUrl != null ? 'Cambiar Foto' : 'Foto / Cámara (< 2MB)',
+                                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                                        ),
+                                        onPressed: _isCompressingImage ? null : _showAvatarOptionsModal,
+                                      ),
+                                      if (_customAvatarUrl != null) ...[
+                                        const SizedBox(width: 4),
+                                        TextButton.icon(
+                                          style: TextButton.styleFrom(
+                                            foregroundColor: const Color(0xFFEF4444),
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            minimumSize: Size.zero,
+                                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                          ),
+                                          icon: const Icon(Icons.delete_outline_rounded, size: 14),
+                                          label: const Text('Quitar', style: TextStyle(fontSize: 11)),
+                                          onPressed: () {
+                                            setState(() {
+                                              _customAvatarUrl = null;
+                                            });
+                                          },
+                                        ),
+                                      ],
+                                    ],
                                   ),
                                   const SizedBox(height: 10),
                                   Row(

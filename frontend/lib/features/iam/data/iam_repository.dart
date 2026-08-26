@@ -273,6 +273,27 @@ class IamRepository {
     }
   }
 
+  /// Sube la foto de perfil al endpoint dedicado con validación MIME y tamaño (IRL-IAM-US-05)
+  Future<String> uploadAvatar({
+    required String avatarData,
+    String contentType = 'image/jpeg',
+  }) async {
+    try {
+      final response = await _client.post(
+        '/users/me/avatar',
+        data: {
+          'avatar_data': avatarData,
+          'content_type': contentType,
+        },
+      );
+      final data = response.data as Map<String, dynamic>;
+      return data['avatar_url'] ?? avatarData;
+    } on DioException catch (e) {
+      final msg = e.response?.data?['message'] ?? 'Error al subir la foto de perfil';
+      throw Exception(msg);
+    }
+  }
+
   /// Cambia la contraseña del usuario autenticado
   Future<String> changePassword({
     required String currentPassword,

@@ -7,6 +7,7 @@ import '../../providers/chat_provider.dart';
 import '../../../iam/providers/auth_provider.dart';
 import '../../../iam/presentation/widgets/profile_dialog.dart';
 
+const _navy950 = AppColors.navy950;
 const _navy900 = AppColors.navy900;
 const _border = AppColors.border;
 const _mint = AppColors.mint;
@@ -39,6 +40,7 @@ class Sidebar extends ConsumerWidget {
     final username = ref.watch(usernameProvider);
     final nodosState = ref.watch(nodosProvider);
     final selectedNodo = ref.watch(selectedNodoProvider);
+    final unreadCounts = ref.watch(unreadCountsProvider);
 
     return Container(
       width: isDrawer ? null : _sidebarWidth,
@@ -121,13 +123,16 @@ class Sidebar extends ConsumerWidget {
                 itemBuilder: (context, idx) {
                   final nodo = nodosState.nodos[idx];
                   final isSelected = selectedNodo?.id == nodo.id;
+                  final unreadCount = unreadCounts[nodo.id] ?? 0;
                   return NavItem(
                     icon: Icons.chat_bubble_outline_rounded,
                     label: '# ${nodo.nombre}',
                     isSelected: isSelected,
+                    badgeCount: isSelected ? 0 : unreadCount,
                     onTap: () {
                       ref.read(selectedSubgrupoProvider.notifier).state = null;
                       ref.read(selectedNodoProvider.notifier).state = nodo;
+                      ref.read(nodosProvider.notifier).clearUnreadCount(nodo.id);
                       onSelect(1);
                     },
                   );
@@ -197,6 +202,7 @@ class NavItem extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool isSelected;
+  final int? badgeCount;
   final VoidCallback onTap;
 
   const NavItem({
@@ -204,11 +210,14 @@ class NavItem extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.isSelected,
+    this.badgeCount,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    final showBadge = badgeCount != null && badgeCount! > 0;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
       child: Material(
@@ -233,13 +242,38 @@ class NavItem extends StatelessWidget {
                     label,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: isSelected ? _mint : _slate400,
+                      color: isSelected ? _mint : (showBadge ? _slate100 : _slate400),
                       fontWeight:
-                          isSelected ? FontWeight.w700 : FontWeight.w500,
+                          isSelected || showBadge ? FontWeight.w700 : FontWeight.w500,
                       fontSize: 13,
                     ),
                   ),
                 ),
+                if (showBadge) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF00E5FF),
+                      borderRadius: BorderRadius.circular(10),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF00E5FF).withValues(alpha: 0.4),
+                          blurRadius: 6,
+                          spreadRadius: 1,
+                        ),
+                      ],
+                    ),
+                    child: Text(
+                      badgeCount! > 99 ? '99+' : '$badgeCount',
+                      style: const TextStyle(
+                        color: _navy950,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

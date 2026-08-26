@@ -400,13 +400,27 @@ pub async fn delete_nodo(
         }
     };
 
-    // 2. Comprobar permisos (SOLO el creador del nodo puede eliminarlo)
-    if creador_id != auth_user.user_id {
+    // 2. Comprobar permisos (Creador del nodo, rol OWNER en nodo_miembros, o ADMIN global)
+    let is_owner = creador_id == auth_user.user_id;
+    let is_global_admin = auth_user.role == "ADMIN";
+
+    let member_role = sqlx::query_scalar::<_, String>(
+        "SELECT rol FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2"
+    )
+    .bind(id)
+    .bind(auth_user.user_id)
+    .fetch_optional(&state.pool)
+    .await
+    .unwrap_or(None);
+
+    let is_node_owner = member_role.as_deref() == Some("OWNER") || is_owner || is_global_admin;
+
+    if !is_node_owner {
         return (
             StatusCode::FORBIDDEN,
             Json(NodoResponse {
                 success: false,
-                message: "Solo el propietario (OWNER) de este nodo puede eliminarlo.".to_string(),
+                message: "Solo el propietario (OWNER) de este nodo o un administrador puede eliminarlo.".to_string(),
                 nodo: None,
                 nodos: None,
             }),
@@ -456,6 +470,9 @@ pub struct NodoMiembroInfo {
     pub name: String,
     pub email: String,
     pub rol: String,
+    pub avatar_color: Option<String>,
+    pub status_text: Option<String>,
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -516,10 +533,10 @@ pub async fn list_miembros(
         );
     }
 
-    // 2. Obtener lista de miembros
-    let rows = sqlx::query_as::<_, (Uuid, String, String, String)>(
+    // 2. Obtener lista de miembros con avatar y estado de presencia
+    let rows = sqlx::query_as::<_, (Uuid, String, String, String, Option<String>, Option<String>, Option<String>)>(
         r#"
-        SELECT u.id, u.name, u.email, nm.rol
+        SELECT u.id, u.name, u.email, nm.rol, u.avatar_color, u.status_text, u.avatar_url
         FROM nodo_miembros nm
         INNER JOIN users u ON nm.user_id = u.id
         WHERE nm.nodo_id = $1
@@ -540,11 +557,14 @@ pub async fn list_miembros(
         Ok(miembros) => {
             let list = miembros
                 .into_iter()
-                .map(|(user_id, name, email, rol)| NodoMiembroInfo {
+                .map(|(user_id, name, email, rol, avatar_color, status_text, avatar_url)| NodoMiembroInfo {
                     user_id,
                     name,
                     email,
                     rol,
+                    avatar_color,
+                    status_text,
+                    avatar_url,
                 })
                 .collect();
 
@@ -1280,6 +1300,9 @@ pub struct MensajeInfo {
     pub contenido: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub subgrupo_id: Option<Uuid>,
+    pub avatar_url: Option<String>,
+    pub avatar_color: Option<String>,
+    pub status_text: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1425,15 +1448,18 @@ pub async fn send_mensaje(
 
     match insert {
         Ok((msg_id, nodo_id, user_id, contenido, created_at, subgrupo_id)) => {
-            // Obtener el nombre del usuario
-            let user_name = sqlx::query_as::<_, (String,)>(
-                "SELECT name FROM users WHERE id = $1"
+            // Obtener datos del perfil del usuario (nombre, avatar y estado)
+            let user_info = sqlx::query_as::<_, (String, Option<String>, Option<String>, Option<String>)>(
+                "SELECT name, avatar_url, avatar_color, status_text FROM users WHERE id = $1"
             )
             .bind(user_id)
             .fetch_one(&state.pool)
-            .await
-            .map(|r| r.0)
-            .unwrap_or_else(|_| "Usuario".to_string());
+            .await;
+
+            let (user_name, avatar_url, avatar_color, status_text) = match user_info {
+                Ok((n, u, c, s)) => (n, u, c, s),
+                Err(_) => ("Usuario".to_string(), None, None, None),
+            };
 
             (
                 StatusCode::CREATED,
@@ -1448,6 +1474,9 @@ pub async fn send_mensaje(
                         contenido,
                         created_at,
                         subgrupo_id,
+                        avatar_url,
+                        avatar_color,
+                        status_text,
                     }),
                     mensajes: None,
                 }),
@@ -1572,12 +1601,12 @@ pub async fn list_mensajes(
         }
     }
 
-    // 3. Obtener lista de mensajes según subgrupo_id o general
+    // 3. Obtener lista de mensajes con perfil del autor según subgrupo_id o general
     let rows = match query.subgrupo_id {
         Some(sub_id) => {
-            sqlx::query_as::<_, (Uuid, Uuid, Uuid, String, String, chrono::DateTime<chrono::Utc>, Option<Uuid>)>(
+            sqlx::query_as::<_, (Uuid, Uuid, Uuid, String, String, chrono::DateTime<chrono::Utc>, Option<Uuid>, Option<String>, Option<String>, Option<String>)>(
                 r#"
-                SELECT m.id, m.nodo_id, m.user_id, u.name as user_name, m.contenido, m.created_at, m.subgrupo_id
+                SELECT m.id, m.nodo_id, m.user_id, u.name as user_name, m.contenido, m.created_at, m.subgrupo_id, u.avatar_url, u.avatar_color, u.status_text
                 FROM mensajes m
                 INNER JOIN users u ON m.user_id = u.id
                 WHERE m.nodo_id = $1 AND m.subgrupo_id = $2
@@ -1591,9 +1620,9 @@ pub async fn list_mensajes(
             .await
         }
         None => {
-            sqlx::query_as::<_, (Uuid, Uuid, Uuid, String, String, chrono::DateTime<chrono::Utc>, Option<Uuid>)>(
+            sqlx::query_as::<_, (Uuid, Uuid, Uuid, String, String, chrono::DateTime<chrono::Utc>, Option<Uuid>, Option<String>, Option<String>, Option<String>)>(
                 r#"
-                SELECT m.id, m.nodo_id, m.user_id, u.name as user_name, m.contenido, m.created_at, m.subgrupo_id
+                SELECT m.id, m.nodo_id, m.user_id, u.name as user_name, m.contenido, m.created_at, m.subgrupo_id, u.avatar_url, u.avatar_color, u.status_text
                 FROM mensajes m
                 INNER JOIN users u ON m.user_id = u.id
                 WHERE m.nodo_id = $1 AND m.subgrupo_id IS NULL
@@ -1611,7 +1640,7 @@ pub async fn list_mensajes(
         Ok(msgs) => {
             let list = msgs
                 .into_iter()
-                .map(|(msg_id, nodo_id, user_id, user_name, contenido, created_at, subgrupo_id)| {
+                .map(|(msg_id, nodo_id, user_id, user_name, contenido, created_at, subgrupo_id, avatar_url, avatar_color, status_text)| {
                     MensajeInfo {
                         id: msg_id,
                         nodo_id,
@@ -1620,9 +1649,31 @@ pub async fn list_mensajes(
                         contenido,
                         created_at,
                         subgrupo_id,
+                        avatar_url,
+                        avatar_color,
+                        status_text,
                     }
                 })
                 .collect();
+
+            // Limpieza automática del badge al sincronizar / abrir el chat (IRL-WKS-US-03)
+            if let Some(sub_id) = query.subgrupo_id {
+                let _ = sqlx::query(
+                    "UPDATE subgrupo_miembros SET last_read_at = NOW() WHERE subgrupo_id = $1 AND user_id = $2"
+                )
+                .bind(sub_id)
+                .bind(auth_user.user_id)
+                .execute(&state.pool)
+                .await;
+            } else {
+                let _ = sqlx::query(
+                    "UPDATE nodo_miembros SET last_read_at = NOW() WHERE nodo_id = $1 AND user_id = $2"
+                )
+                .bind(id)
+                .bind(auth_user.user_id)
+                .execute(&state.pool)
+                .await;
+            }
 
             (
                 StatusCode::OK,
@@ -1643,6 +1694,171 @@ pub async fn list_mensajes(
                     message: "Error interno al cargar los mensajes.".to_string(),
                     mensaje: None,
                     mensajes: None,
+                }),
+            )
+        }
+    }
+}
+
+// ─── DTOs de Contador de Mensajes No Leídos (IRL-WKS-US-03) ────────────────
+
+#[derive(Serialize)]
+pub struct UnreadCountResponse {
+    pub success: bool,
+    pub message: String,
+    pub unread_count: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_read_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Serialize)]
+pub struct MarkReadResponse {
+    pub success: bool,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_read_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+// ─── GET /nodos/{id}/unread-count y /api/node/{id}/unread-count ───────────
+
+pub async fn get_unread_count(
+    State(state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
+    axum::extract::Path(id): axum::extract::Path<Uuid>,
+) -> (StatusCode, Json<UnreadCountResponse>) {
+    // 1. Obtener last_read_at del miembro en el nodo
+    let member = sqlx::query_as::<_, (Option<chrono::DateTime<chrono::Utc>>,)> (
+        "SELECT last_read_at FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2"
+    )
+    .bind(id)
+    .bind(auth_user.user_id)
+    .fetch_optional(&state.pool)
+    .await;
+
+    let last_read_at = match member {
+        Ok(Some((lr,))) => lr,
+        Ok(None) => {
+            if auth_user.role != "ADMIN" {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(UnreadCountResponse {
+                        success: false,
+                        message: "No eres miembro de este nodo.".to_string(),
+                        unread_count: 0,
+                        last_read_at: None,
+                    }),
+                );
+            }
+            None
+        }
+        Err(e) => {
+            eprintln!("Error al consultar membresía para unread_count: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(UnreadCountResponse {
+                    success: false,
+                    message: "Error interno al verificar estado de lectura.".to_string(),
+                    unread_count: 0,
+                    last_read_at: None,
+                }),
+            );
+        }
+    };
+
+    // 2. Contar mensajes pendientes no leídos en el canal general del nodo
+    let count_res = match last_read_at {
+        Some(read_time) => {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM mensajes WHERE nodo_id = $1 AND subgrupo_id IS NULL AND created_at > $2 AND user_id != $3"
+            )
+            .bind(id)
+            .bind(read_time)
+            .bind(auth_user.user_id)
+            .fetch_one(&state.pool)
+            .await
+        }
+        None => {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM mensajes WHERE nodo_id = $1 AND subgrupo_id IS NULL AND user_id != $2"
+            )
+            .bind(id)
+            .bind(auth_user.user_id)
+            .fetch_one(&state.pool)
+            .await
+        }
+    };
+
+    match count_res {
+        Ok(unread_count) => (
+            StatusCode::OK,
+            Json(UnreadCountResponse {
+                success: true,
+                message: "Contador de mensajes no leídos obtenido.".to_string(),
+                unread_count,
+                last_read_at,
+            }),
+        ),
+        Err(e) => {
+            eprintln!("Error al contar mensajes no leídos: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(UnreadCountResponse {
+                    success: false,
+                    message: "Error interno al calcular mensajes no leídos.".to_string(),
+                    unread_count: 0,
+                    last_read_at,
+                }),
+            )
+        }
+    }
+}
+
+// ─── POST /nodos/{id}/read y /api/node/{id}/check_read_status ─────────────
+
+pub async fn mark_as_read(
+    State(state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
+    axum::extract::Path(id): axum::extract::Path<Uuid>,
+) -> (StatusCode, Json<MarkReadResponse>) {
+    let now = chrono::Utc::now();
+    let res = sqlx::query(
+        "UPDATE nodo_miembros SET last_read_at = $1 WHERE nodo_id = $2 AND user_id = $3"
+    )
+    .bind(now)
+    .bind(id)
+    .bind(auth_user.user_id)
+    .execute(&state.pool)
+    .await;
+
+    match res {
+        Ok(r) => {
+            if r.rows_affected() == 0 && auth_user.role != "ADMIN" {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(MarkReadResponse {
+                        success: false,
+                        message: "No perteneces a este nodo.".to_string(),
+                        last_read_at: None,
+                    }),
+                );
+            }
+            (
+                StatusCode::OK,
+                Json(MarkReadResponse {
+                    success: true,
+                    message: "Registro de lectura actualizado exitosamente.".to_string(),
+                    last_read_at: Some(now),
+                }),
+            )
+        }
+        Err(e) => {
+            eprintln!("Error al actualizar last_read_at: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(MarkReadResponse {
+                    success: false,
+                    message: "Error interno al actualizar estado de lectura.".to_string(),
+                    last_read_at: None,
                 }),
             )
         }

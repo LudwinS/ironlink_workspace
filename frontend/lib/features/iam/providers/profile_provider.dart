@@ -98,6 +98,36 @@ class ProfileNotifier extends StateNotifier<ProfileState> {
     }
   }
 
+  Future<bool> uploadAvatar({
+    required String avatarData,
+    String contentType = 'image/jpeg',
+  }) async {
+    state = state.copyWith(isLoading: true, clearErrors: true, clearSuccess: true);
+    try {
+      final finalUrl = await _repository.uploadAvatar(
+        avatarData: avatarData,
+        contentType: contentType,
+      );
+      if (state.profile != null) {
+        final updated = state.profile!.copyWith(avatarUrl: finalUrl);
+        state = state.copyWith(
+          profile: updated,
+          isLoading: false,
+          successMessage: 'Foto de perfil actualizada exitosamente.',
+        );
+      } else {
+        await loadProfile();
+      }
+      return true;
+    } catch (e) {
+      state = state.copyWith(
+        isLoading: false,
+        errorMessage: e.toString().replaceAll('Exception: ', ''),
+      );
+      return false;
+    }
+  }
+
   Future<bool> changePassword({
     required String currentPassword,
     required String newPassword,

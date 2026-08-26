@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/widgets/user_avatar.dart';
 import '../../data/nodos_repository.dart';
 import '../../data/subgrupos_repository.dart';
 import '../../providers/nodos_provider.dart';
@@ -12,6 +13,8 @@ import '../../../iam/providers/auth_provider.dart';
 import 'nodo_details_dialog.dart';
 import 'subgrupos_view.dart';
 import 'reuniones_view.dart';
+import 'assign_members_dialog.dart';
+import 'edit_subgrupo_dialog.dart';
 
 const _navy950 = AppColors.navy950;
 const _navy900 = AppColors.navy900;
@@ -22,6 +25,21 @@ const _slate100 = AppColors.slate100;
 const _slate400 = AppColors.slate400;
 const _slate500 = AppColors.slate500;
 const _slate600 = AppColors.slate600;
+
+Color _getStatusColor(String? status) {
+  if (status == null || status.isEmpty) return const Color(0xFF10B981);
+  final lower = status.toLowerCase();
+  if (status.contains('🔴') || lower.contains('ocupado') || lower.contains('no molestar')) {
+    return const Color(0xFFEF4444);
+  }
+  if (status.contains('🟡') || lower.contains('reunión') || lower.contains('reunion') || lower.contains('ausente')) {
+    return const Color(0xFFF59E0B);
+  }
+  if (status.contains('📚') || lower.contains('estudiando') || lower.contains('desarrollando')) {
+    return const Color(0xFF00E5FF);
+  }
+  return const Color(0xFF10B981);
+}
 
 const double _mobileBreakpoint = 768.0;
 
@@ -46,7 +64,7 @@ class _NodoChatWorkspaceState extends ConsumerState<NodoChatWorkspace> {
   void initState() {
     super.initState();
     _fetchMiembros();
-    _membersTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+    _membersTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       _fetchMiembros();
     });
   }
@@ -173,6 +191,7 @@ class _NodoChatWorkspaceState extends ConsumerState<NodoChatWorkspace> {
     required bool isSelected,
     required VoidCallback onTap,
     Color activeColor = _mint,
+    int badgeCount = 0,
   }) {
     return InkWell(
       onTap: onTap,
@@ -200,6 +219,24 @@ class _NodoChatWorkspaceState extends ConsumerState<NodoChatWorkspace> {
                 fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
               ),
             ),
+            if (badgeCount > 0) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEF4444),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '+$badgeCount',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -217,6 +254,11 @@ class _NodoChatWorkspaceState extends ConsumerState<NodoChatWorkspace> {
     final currentUserNodeRole = widget.nodo.rol?.toUpperCase() ?? 'MEMBER';
     final isGlobalAdmin = globalRole.toUpperCase() == 'ADMIN';
     final isOwnerOrGlobalAdmin = currentUserNodeRole == 'OWNER' || isGlobalAdmin;
+    final subgruposState = ref.watch(subgruposProvider(widget.nodo.id));
+    final totalSubgruposUnread = subgruposState.subgrupos.fold<int>(
+      0,
+      (sum, item) => sum + item.unreadCount,
+    );
 
     final isSubgrupoLocked = selectedSubgrupo != null &&
         selectedSubgrupo.esPrivado &&
@@ -369,6 +411,7 @@ class _NodoChatWorkspaceState extends ConsumerState<NodoChatWorkspace> {
                                     label: '#${selectedSubgrupo.nombre}',
                                     isSelected: _currentTab == 0,
                                     activeColor: _cyan,
+                                    badgeCount: selectedSubgrupo.unreadCount,
                                     onTap: () => setState(() => _currentTab = 0),
                                   ),
                                 ],
@@ -378,6 +421,7 @@ class _NodoChatWorkspaceState extends ConsumerState<NodoChatWorkspace> {
                                   label: 'Subgrupos',
                                   isSelected: _currentTab == 1,
                                   activeColor: _cyan,
+                                  badgeCount: totalSubgruposUnread,
                                   onTap: () => setState(() => _currentTab = 1),
                                 ),
                                 const SizedBox(width: 4),
@@ -394,6 +438,31 @@ class _NodoChatWorkspaceState extends ConsumerState<NodoChatWorkspace> {
                         ),
                       ),
                       const SizedBox(width: 12),
+                      if (selectedSubgrupo != null) ...[
+                        IconButton(
+                          icon: const Icon(Icons.group_add_rounded, color: _cyan, size: 20),
+                          tooltip: 'Asignar miembros a este subgrupo',
+                          onPressed: () async {
+                            await AssignMembersDialog.show(
+                              context,
+                              nodoId: widget.nodo.id,
+                              subgrupo: selectedSubgrupo,
+                            );
+                            _fetchMiembros();
+                          },
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.edit_outlined, color: _slate400, size: 19),
+                          tooltip: 'Editar subgrupo en caliente',
+                          onPressed: () async {
+                            await EditSubgrupoDialog.show(
+                              context,
+                              nodoId: widget.nodo.id,
+                              subgrupo: selectedSubgrupo,
+                            );
+                          },
+                        ),
+                      ],
                       IconButton(
                         icon: const Icon(Icons.settings_rounded, color: _slate400, size: 20),
                         tooltip: 'Configuración del nodo',
@@ -621,6 +690,9 @@ class _NodoChatWorkspaceState extends ConsumerState<NodoChatWorkspace> {
                                     isSelf: isSelf,
                                     userRole: role,
                                     accentColor: themeColor,
+                                    senderAvatarUrl: senderMember?.avatarUrl ?? msg.avatarUrl,
+                                    senderAvatarColor: senderMember?.avatarColor ?? msg.avatarColor,
+                                    senderStatusText: senderMember?.statusText ?? msg.statusText,
                                   );
                                 },
                               ),
@@ -807,6 +879,8 @@ class SubgrupoMemberSidebarRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final statusColor = _getStatusColor(member.statusText);
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
       child: Container(
@@ -819,27 +893,15 @@ class SubgrupoMemberSidebarRow extends StatelessWidget {
             Stack(
               clipBehavior: Clip.none,
               children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: isSelf
-                        ? const LinearGradient(colors: [_cyan, _mint])
-                        : const LinearGradient(colors: [_slate500, _slate600]),
-                  ),
-                  child: Center(
-                    child: Text(
-                      member.name.isNotEmpty ? member.name[0].toUpperCase() : 'U',
-                      style: TextStyle(
-                        color: isSelf ? _navy950 : _slate100,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
+                UserAvatar(
+                  avatarUrl: member.avatarUrl,
+                  avatarColor: member.avatarColor,
+                  name: member.name,
+                  size: 32,
+                  showBorder: isSelf,
+                  borderColor: _cyan,
                 ),
-                // BUG-S2-10: Indicador de presencia en vivo en integrantes de subgrupo
+                // Indicador de presencia en vivo con color según estado
                 Positioned(
                   bottom: -1,
                   right: -1,
@@ -847,7 +909,7 @@ class SubgrupoMemberSidebarRow extends StatelessWidget {
                     width: 10,
                     height: 10,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF10B981), // Verde activo
+                      color: statusColor,
                       shape: BoxShape.circle,
                       border: Border.all(color: _navy900, width: 2),
                     ),
@@ -869,10 +931,11 @@ class SubgrupoMemberSidebarRow extends StatelessWidget {
                       fontWeight: FontWeight.w500,
                     ),
                   ),
-                  const Text(
-                    '● En línea',
+                  Text(
+                    member.statusText?.isNotEmpty == true ? member.statusText! : '● En línea',
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: Color(0xFF10B981),
+                      color: statusColor,
                       fontSize: 10,
                       fontWeight: FontWeight.w600,
                     ),
@@ -894,6 +957,9 @@ class ChatMessageRow extends StatelessWidget {
   final bool isSelf;
   final String? userRole;
   final Color accentColor;
+  final String? senderAvatarUrl;
+  final String? senderAvatarColor;
+  final String? senderStatusText;
 
   const ChatMessageRow({
     super.key,
@@ -901,6 +967,9 @@ class ChatMessageRow extends StatelessWidget {
     required this.isSelf,
     this.userRole,
     this.accentColor = _mint,
+    this.senderAvatarUrl,
+    this.senderAvatarColor,
+    this.senderStatusText,
   });
 
   Widget _buildRoleTag(String role) {
@@ -945,42 +1014,22 @@ class ChatMessageRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final initials = _getInitials(mensaje.userName);
+    final status = senderStatusText ?? mensaje.statusText;
+    final statusColor = _getStatusColor(status);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Avatar
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: isSelf
-                  ? LinearGradient(
-                      colors: [accentColor, _cyan],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    )
-                  : const LinearGradient(
-                      colors: [_slate500, _slate600],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-              border: Border.all(color: _border, width: 1),
-            ),
-            child: Center(
-              child: Text(
-                initials,
-                style: TextStyle(
-                  color: isSelf ? _navy950 : _slate100,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                ),
-              ),
-            ),
+          // Avatar con soporte para Foto Personalizada / Color Base
+          UserAvatar(
+            avatarUrl: senderAvatarUrl ?? mensaje.avatarUrl,
+            avatarColor: senderAvatarColor ?? mensaje.avatarColor,
+            name: mensaje.userName,
+            size: 40,
+            showBorder: isSelf,
+            borderColor: accentColor,
           ),
           const SizedBox(width: 12),
           // Contenido del mensaje
@@ -988,24 +1037,39 @@ class ChatMessageRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 6,
+                  runSpacing: 4,
                   children: [
-                    Flexible(
-                      child: Text(
-                        mensaje.userName,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: isSelf ? accentColor : _slate100,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
+                    Text(
+                      mensaje.userName,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: isSelf ? accentColor : _slate100,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
                       ),
                     ),
-                    if (userRole != null && userRole!.isNotEmpty) ...[
-                      const SizedBox(width: 6),
+                    if (userRole != null && userRole!.isNotEmpty)
                       _buildRoleTag(userRole!),
-                    ],
-                    const SizedBox(width: 8),
+                    if (status != null && status.trim().isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                        decoration: BoxDecoration(
+                          color: statusColor.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: statusColor.withValues(alpha: 0.3), width: 0.8),
+                        ),
+                        child: Text(
+                          status.trim(),
+                          style: TextStyle(
+                            color: statusColor,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
                     Text(
                       _formatTime(mensaje.createdAt),
                       style: const TextStyle(
@@ -1030,14 +1094,6 @@ class ChatMessageRow extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  String _getInitials(String name) {
-    final parts = name.trim().split(RegExp(r'\s+'));
-    if (parts.length >= 2) {
-      return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
-    }
-    return name.isNotEmpty ? name[0].toUpperCase() : 'U';
   }
 
   String _formatTime(DateTime date) {
@@ -1070,6 +1126,8 @@ class MemberSidebarRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final statusColor = _getStatusColor(member.statusText);
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
       child: Container(
@@ -1079,29 +1137,17 @@ class MemberSidebarRow extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // Avatar con Indicador de Presencia en vivo (BUG-S2-10)
+            // Avatar con Indicador de Presencia en vivo y Foto personalizada
             Stack(
               clipBehavior: Clip.none,
               children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: isSelf
-                        ? const LinearGradient(colors: [_mint, _cyan])
-                        : const LinearGradient(colors: [_slate500, _slate600]),
-                  ),
-                  child: Center(
-                    child: Text(
-                      member.name.isNotEmpty ? member.name[0].toUpperCase() : 'U',
-                      style: TextStyle(
-                        color: isSelf ? _navy950 : _slate100,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
+                UserAvatar(
+                  avatarUrl: member.avatarUrl,
+                  avatarColor: member.avatarColor,
+                  name: member.name,
+                  size: 32,
+                  showBorder: isSelf,
+                  borderColor: _mint,
                 ),
                 Positioned(
                   bottom: -1,
@@ -1110,7 +1156,7 @@ class MemberSidebarRow extends StatelessWidget {
                     width: 10,
                     height: 10,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF10B981), // Verde activo
+                      color: statusColor,
                       shape: BoxShape.circle,
                       border: Border.all(color: _navy900, width: 2),
                     ),
@@ -1133,10 +1179,11 @@ class MemberSidebarRow extends StatelessWidget {
                       fontWeight: FontWeight.w500,
                     ),
                   ),
-                  const Text(
-                    '● En línea',
+                  Text(
+                    member.statusText?.isNotEmpty == true ? member.statusText! : '● En línea',
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: Color(0xFF10B981),
+                      color: statusColor,
                       fontSize: 10,
                       fontWeight: FontWeight.w600,
                     ),
