@@ -35,30 +35,37 @@ class ReunionesView extends ConsumerWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.video_call_rounded, color: _mint, size: 22),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Reuniones y Sesiones de Nodo (${reunionesState.reuniones.length})',
-                          style: const TextStyle(
-                            color: _slate100,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.video_call_rounded, color: _mint, size: 22),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              'Reuniones y Sesiones de Nodo (${reunionesState.reuniones.length})',
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: _slate100,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    const Text(
-                      'Videollamadas programadas, clases y revisiones de sprint',
-                      style: TextStyle(color: _slate500, fontSize: 12),
-                    ),
-                  ],
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      const Text(
+                        'Videollamadas programadas, clases y revisiones de sprint',
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: _slate500, fontSize: 12),
+                      ),
+                    ],
+                  ),
                 ),
+                const SizedBox(width: 12),
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _mint,

@@ -337,55 +337,60 @@ class _NodoChatWorkspaceState extends ConsumerState<NodoChatWorkspace> {
                       ),
 
                       // Tabs de selección
-                      Container(
-                        padding: const EdgeInsets.all(3),
-                        decoration: BoxDecoration(
-                          color: _navy950,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: _border),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // Botón Chat General
-                            _workspaceTabBtn(
-                              icon: Icons.chat_bubble_outline_rounded,
-                              label: 'Chat General',
-                              isSelected: _currentTab == 0 && selectedSubgrupo == null,
-                              activeColor: _mint,
-                              onTap: () {
-                                ref.read(selectedSubgrupoProvider.notifier).state = null;
-                                setState(() => _currentTab = 0);
-                              },
+                      Flexible(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Container(
+                            padding: const EdgeInsets.all(3),
+                            decoration: BoxDecoration(
+                              color: _navy950,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: _border),
                             ),
-                            // Si hay subgrupo activo, mostrar pestaña dedicada
-                            if (selectedSubgrupo != null) ...[
-                              const SizedBox(width: 4),
-                              _workspaceTabBtn(
-                                icon: selectedSubgrupo.esPrivado ? Icons.lock_outline_rounded : Icons.forum_outlined,
-                                label: '#${selectedSubgrupo.nombre}',
-                                isSelected: _currentTab == 0,
-                                activeColor: _cyan,
-                                onTap: () => setState(() => _currentTab = 0),
-                              ),
-                            ],
-                            const SizedBox(width: 4),
-                            _workspaceTabBtn(
-                              icon: Icons.groups_rounded,
-                              label: 'Subgrupos',
-                              isSelected: _currentTab == 1,
-                              activeColor: _cyan,
-                              onTap: () => setState(() => _currentTab = 1),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                // Botón Chat General
+                                _workspaceTabBtn(
+                                  icon: Icons.chat_bubble_outline_rounded,
+                                  label: 'Chat General',
+                                  isSelected: _currentTab == 0 && selectedSubgrupo == null,
+                                  activeColor: _mint,
+                                  onTap: () {
+                                    ref.read(selectedSubgrupoProvider.notifier).state = null;
+                                    setState(() => _currentTab = 0);
+                                  },
+                                ),
+                                // Si hay subgrupo activo, mostrar pestaña dedicada
+                                if (selectedSubgrupo != null) ...[
+                                  const SizedBox(width: 4),
+                                  _workspaceTabBtn(
+                                    icon: selectedSubgrupo.esPrivado ? Icons.lock_outline_rounded : Icons.forum_outlined,
+                                    label: '#${selectedSubgrupo.nombre}',
+                                    isSelected: _currentTab == 0,
+                                    activeColor: _cyan,
+                                    onTap: () => setState(() => _currentTab = 0),
+                                  ),
+                                ],
+                                const SizedBox(width: 4),
+                                _workspaceTabBtn(
+                                  icon: Icons.groups_rounded,
+                                  label: 'Subgrupos',
+                                  isSelected: _currentTab == 1,
+                                  activeColor: _cyan,
+                                  onTap: () => setState(() => _currentTab = 1),
+                                ),
+                                const SizedBox(width: 4),
+                                _workspaceTabBtn(
+                                  icon: Icons.calendar_today_rounded,
+                                  label: 'Reuniones',
+                                  isSelected: _currentTab == 2,
+                                  activeColor: _mint,
+                                  onTap: () => setState(() => _currentTab = 2),
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 4),
-                            _workspaceTabBtn(
-                              icon: Icons.calendar_today_rounded,
-                              label: 'Reuniones',
-                              isSelected: _currentTab == 2,
-                              activeColor: _mint,
-                              onTap: () => setState(() => _currentTab = 2),
-                            ),
-                          ],
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -495,13 +500,23 @@ class _NodoChatWorkspaceState extends ConsumerState<NodoChatWorkspace> {
                                   style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
                                 ),
                                 onPressed: () async {
-                                  await ref.read(subgruposProvider(widget.nodo.id).notifier).toggleJoin(selectedSubgrupo);
-                                  ref.read(selectedSubgrupoProvider.notifier).state = selectedSubgrupo.copyWith(
-                                    isMember: true,
-                                    miembrosCount: selectedSubgrupo.miembrosCount + 1,
-                                  );
-                                  _fetchMiembros();
-                                  _showSuccessSnack('¡Te has unido al subgrupo exitosamente!');
+                                  final success = await ref.read(subgruposProvider(widget.nodo.id).notifier).toggleJoin(selectedSubgrupo);
+                                  if (success) {
+                                    final updatedList = ref.read(subgruposProvider(widget.nodo.id)).subgrupos;
+                                    final updatedSub = updatedList.firstWhere(
+                                      (s) => s.id == selectedSubgrupo.id,
+                                      orElse: () => selectedSubgrupo.copyWith(
+                                        isMember: true,
+                                        miembrosCount: selectedSubgrupo.miembrosCount + 1,
+                                      ),
+                                    );
+                                    ref.read(selectedSubgrupoProvider.notifier).state = updatedSub;
+                                    _fetchMiembros();
+                                    _showSuccessSnack('¡Te has unido al subgrupo exitosamente!');
+                                  } else {
+                                    final err = ref.read(subgruposProvider(widget.nodo.id)).errorMessage ?? 'No se pudo unir al subgrupo.';
+                                    _showErrorSnack(err);
+                                  }
                                 },
                               ),
                             ),
@@ -592,9 +607,19 @@ class _NodoChatWorkspaceState extends ConsumerState<NodoChatWorkspace> {
                                 itemBuilder: (context, i) {
                                   final msg = chatState.mensajes[i];
                                   final isSelf = msg.userId == ref.watch(authProvider).userId;
+                                  final senderMember = _miembros.cast<NodoMiembro?>().firstWhere(
+                                    (m) => m?.userId == msg.userId,
+                                    orElse: () => null,
+                                  );
+                                  final isOwner = msg.userId == widget.nodo.creadorId;
+                                  final role = isOwner
+                                      ? 'OWNER'
+                                      : (senderMember?.rol ?? (isSelf ? widget.nodo.rol : 'MEMBER'));
+
                                   return ChatMessageRow(
                                     mensaje: msg,
                                     isSelf: isSelf,
+                                    userRole: role,
                                     accentColor: themeColor,
                                   );
                                 },
@@ -791,25 +816,44 @@ class SubgrupoMemberSidebarRow extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: isSelf
-                    ? const LinearGradient(colors: [_cyan, _mint])
-                    : const LinearGradient(colors: [_slate500, _slate600]),
-              ),
-              child: Center(
-                child: Text(
-                  member.name.isNotEmpty ? member.name[0].toUpperCase() : 'U',
-                  style: TextStyle(
-                    color: isSelf ? _navy950 : _slate100,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: isSelf
+                        ? const LinearGradient(colors: [_cyan, _mint])
+                        : const LinearGradient(colors: [_slate500, _slate600]),
+                  ),
+                  child: Center(
+                    child: Text(
+                      member.name.isNotEmpty ? member.name[0].toUpperCase() : 'U',
+                      style: TextStyle(
+                        color: isSelf ? _navy950 : _slate100,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
                   ),
                 ),
-              ),
+                // BUG-S2-10: Indicador de presencia en vivo en integrantes de subgrupo
+                Positioned(
+                  bottom: -1,
+                  right: -1,
+                  child: Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981), // Verde activo
+                      shape: BoxShape.circle,
+                      border: Border.all(color: _navy900, width: 2),
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -826,10 +870,11 @@ class SubgrupoMemberSidebarRow extends StatelessWidget {
                     ),
                   ),
                   const Text(
-                    'Miembro del subgrupo',
+                    '● En línea',
                     style: TextStyle(
-                      color: _slate500,
+                      color: Color(0xFF10B981),
                       fontSize: 10,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ],
@@ -847,14 +892,56 @@ class SubgrupoMemberSidebarRow extends StatelessWidget {
 class ChatMessageRow extends StatelessWidget {
   final Mensaje mensaje;
   final bool isSelf;
+  final String? userRole;
   final Color accentColor;
 
   const ChatMessageRow({
     super.key,
     required this.mensaje,
     required this.isSelf,
+    this.userRole,
     this.accentColor = _mint,
   });
+
+  Widget _buildRoleTag(String role) {
+    Color color;
+    Color bg;
+    String label;
+    switch (role.toUpperCase()) {
+      case 'OWNER':
+        color = const Color(0xFFF59E0B); // Gold / Amber
+        bg = const Color(0xFFF59E0B).withValues(alpha: 0.18);
+        label = 'CREADOR';
+        break;
+      case 'ADMIN':
+        color = _cyan;
+        bg = _cyan.withValues(alpha: 0.18);
+        label = 'ADMIN';
+        break;
+      default:
+        color = _slate400;
+        bg = _slate400.withValues(alpha: 0.12);
+        label = 'MIEMBRO';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withValues(alpha: 0.5), width: 0.8),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 9.5,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -903,14 +990,21 @@ class ChatMessageRow extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Text(
-                      mensaje.userName,
-                      style: TextStyle(
-                        color: isSelf ? accentColor : _slate100,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
+                    Flexible(
+                      child: Text(
+                        mensaje.userName,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: isSelf ? accentColor : _slate100,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
                       ),
                     ),
+                    if (userRole != null && userRole!.isNotEmpty) ...[
+                      const SizedBox(width: 6),
+                      _buildRoleTag(userRole!),
+                    ],
                     const SizedBox(width: 8),
                     Text(
                       _formatTime(mensaje.createdAt),
@@ -985,38 +1079,69 @@ class MemberSidebarRow extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // Avatar
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: isSelf
-                    ? const LinearGradient(colors: [_mint, _cyan])
-                    : const LinearGradient(colors: [_slate500, _slate600]),
-              ),
-              child: Center(
-                child: Text(
-                  member.name.isNotEmpty ? member.name[0].toUpperCase() : 'U',
-                  style: TextStyle(
-                    color: isSelf ? _navy950 : _slate100,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
+            // Avatar con Indicador de Presencia en vivo (BUG-S2-10)
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: isSelf
+                        ? const LinearGradient(colors: [_mint, _cyan])
+                        : const LinearGradient(colors: [_slate500, _slate600]),
+                  ),
+                  child: Center(
+                    child: Text(
+                      member.name.isNotEmpty ? member.name[0].toUpperCase() : 'U',
+                      style: TextStyle(
+                        color: isSelf ? _navy950 : _slate100,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
                   ),
                 ),
-              ),
+                Positioned(
+                  bottom: -1,
+                  right: -1,
+                  child: Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981), // Verde activo
+                      shape: BoxShape.circle,
+                      border: Border.all(color: _navy900, width: 2),
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(width: 10),
-            // Name
+            // Name y Presencia
             Expanded(
-              child: Text(
-                isSelf ? '${member.name} (Tú)' : member.name,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: isSelf ? _mint : _slate100,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    isSelf ? '${member.name} (Tú)' : member.name,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isSelf ? _mint : _slate100,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const Text(
+                    '● En línea',
+                    style: TextStyle(
+                      color: Color(0xFF10B981),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ),
             ),
             // Options if canManage

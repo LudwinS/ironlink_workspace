@@ -43,30 +43,37 @@ class SubgruposView extends ConsumerWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.groups_rounded, color: _cyan, size: 20),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Subgrupos del Nodo (${subgruposState.subgrupos.length})',
-                          style: const TextStyle(
-                            color: _slate100,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.groups_rounded, color: _cyan, size: 20),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              'Subgrupos del Nodo (${subgruposState.subgrupos.length})',
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: _slate100,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    const Text(
-                      'Espacios temáticos y equipos de trabajo focalizados',
-                      style: TextStyle(color: _slate500, fontSize: 12),
-                    ),
-                  ],
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      const Text(
+                        'Espacios temáticos y equipos de trabajo focalizados',
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: _slate500, fontSize: 12),
+                      ),
+                    ],
+                  ),
                 ),
+                const SizedBox(width: 12),
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _cyan,
@@ -298,8 +305,20 @@ class _SubgrupoCard extends ConsumerWidget {
                       sub.isMember ? 'Salir' : 'Unirse',
                       style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
                     ),
-                    onPressed: () {
-                      ref.read(subgruposProvider(nodoId).notifier).toggleJoin(sub);
+                    onPressed: () async {
+                      final success = await ref.read(subgruposProvider(nodoId).notifier).toggleJoin(sub);
+                      if (!success && context.mounted) {
+                        final err = ref.read(subgruposProvider(nodoId)).errorMessage;
+                        if (err != null && err.isNotEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(err),
+                              backgroundColor: const Color(0xFFEF4444),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        }
+                      }
                     },
                   ),
                   const SizedBox(width: 4),

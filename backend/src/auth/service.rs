@@ -65,32 +65,37 @@ pub struct ChangeRoleDto {
 
 // ─── Validación de contraseña ────────────────────────────────────────────
 
-/// Valida la contraseña y retorna un mapa de errores por campo.
-/// Si el mapa está vacío, la contraseña cumple todos los criterios.
-pub fn validate_password(password: &str) -> HashMap<String, String> {
+/// Valida la contraseña para un campo específico y retorna un mapa de errores por campo.
+/// Si el mapa está vacío, la contraseña cumple todos los criterios de seguridad.
+pub fn validate_password_field(password: &str, field_name: &str) -> HashMap<String, String> {
     let mut errors: Vec<String> = Vec::new();
 
     if password.chars().count() < 8 {
         errors.push("Debe tener al menos 8 caracteres".to_string());
     }
     if !password.chars().any(|c| c.is_uppercase()) {
-        errors.push("Debe contener al menos una mayúscula".to_string());
+        errors.push("Debe contener al menos una letra mayúscula".to_string());
     }
     if !password.chars().any(|c| c.is_lowercase()) {
-        errors.push("Debe contener al menos una minúscula".to_string());
+        errors.push("Debe contener al menos una letra minúscula".to_string());
     }
     if !password.chars().any(|c| c.is_numeric()) {
         errors.push("Debe contener al menos un número".to_string());
     }
-    if !password.chars().any(|c| "!@#$%^&*()_+-=[]{}|;:',.<>?/".contains(c)) {
-        errors.push("Debe contener al menos un carácter especial".to_string());
+    if !password.chars().any(|c| c.is_ascii_punctuation() || (!c.is_alphanumeric() && !c.is_whitespace())) {
+        errors.push("Debe contener al menos un carácter especial (ej. !@#$%^&*()_+-=)".to_string());
     }
 
     let mut field_errors = HashMap::new();
     if !errors.is_empty() {
-        field_errors.insert("password".to_string(), errors.join(". "));
+        field_errors.insert(field_name.to_string(), errors.join(". "));
     }
     field_errors
+}
+
+/// Valida la contraseña por defecto con clave "password"
+pub fn validate_password(password: &str) -> HashMap<String, String> {
+    validate_password_field(password, "password")
 }
 
 // ─── POST /register ──────────────────────────────────────────────────────
@@ -794,8 +799,22 @@ pub async fn change_user_password(
         );
     }
 
-    // 3. Validar nueva contraseña
-    let field_errors = validate_password(&payload.new_password);
+    // 3. Validar que la nueva contraseña sea diferente a la actual
+    if payload.current_password == payload.new_password {
+        let mut field_errors = HashMap::new();
+        field_errors.insert("new_password".to_string(), "La nueva contraseña debe ser diferente a la contraseña actual.".to_string());
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                success: false,
+                message: "La nueva contraseña debe ser diferente a la contraseña actual.".to_string(),
+                field_errors: Some(field_errors),
+            }),
+        );
+    }
+
+    // 4. Validar política de seguridad de la nueva contraseña (longitud y complejidad)
+    let field_errors = validate_password_field(&payload.new_password, "new_password");
     if !field_errors.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -807,7 +826,7 @@ pub async fn change_user_password(
         );
     }
 
-    // 4. Hashear nueva contraseña
+    // 5. Hashear nueva contraseña
     let salt = SaltString::generate(&mut OsRng);
     let new_hash = match Argon2::default().hash_password(payload.new_password.as_bytes(), &salt) {
         Ok(h) => h.to_string(),

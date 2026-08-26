@@ -245,7 +245,7 @@ pub async fn list_subgrupos(
             (SELECT COUNT(*) FROM subgrupo_miembros sm WHERE sm.subgrupo_id = s.id) AS miembros_count,
             EXISTS(SELECT 1 FROM subgrupo_miembros sm WHERE sm.subgrupo_id = s.id AND sm.user_id = $2) AS is_member
         FROM subgrupos s
-        WHERE s.nodo_id = $1
+        WHERE s.nodo_id = $1 AND s.is_archived = FALSE
         ORDER BY s.created_at ASC
     ";
 
@@ -304,7 +304,7 @@ pub async fn join_subgrupo(
     axum::Extension(auth_user): axum::Extension<AuthUser>,
     Path((nodo_id, subgrupo_id)): Path<(Uuid, Uuid)>,
 ) -> (StatusCode, Json<SubgrupoResponse>) {
-    // 1. Validar que el usuario sea miembro del nodo
+    // 1. Validar que el usuario sea miembro del nodo principal
     let is_node_member = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2)"
     )
@@ -326,7 +326,79 @@ pub async fn join_subgrupo(
         );
     }
 
-    // 2. Insertar en subgrupo_miembros
+    // 2. BUG-S2-09 & BUG-S2-06: Verificar existencia del subgrupo, pertenencia al nodo, estado de archivo y privacidad
+    let subgrupo = sqlx::query_as::<_, (bool, bool, Uuid)>(
+        "SELECT es_privado, is_archived, creado_por FROM subgrupos WHERE id = $1 AND nodo_id = $2"
+    )
+    .bind(subgrupo_id)
+    .bind(nodo_id)
+    .fetch_optional(&state.pool)
+    .await;
+
+    match subgrupo {
+        Ok(Some((_, true, _))) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(SubgrupoResponse {
+                    success: false,
+                    message: "El subgrupo no existe o ha sido archivado.".to_string(),
+                    subgrupo: None,
+                    subgrupos: None,
+                }),
+            );
+        }
+        Ok(Some((true, false, creado_por))) => {
+            // Validar si el usuario es el creador o ADMIN/OWNER del nodo
+            let is_admin_or_owner = sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM nodo_miembros WHERE nodo_id = $1 AND user_id = $2 AND rol IN ('ADMIN', 'OWNER'))"
+            )
+            .bind(nodo_id)
+            .bind(auth_user.user_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap_or(false);
+
+            if auth_user.user_id != creado_por && !is_admin_or_owner {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(SubgrupoResponse {
+                        success: false,
+                        message: "Este subgrupo es privado y no permite la auto-adhesión directa sin invitación previa.".to_string(),
+                        subgrupo: None,
+                        subgrupos: None,
+                    }),
+                );
+            }
+        }
+        Ok(Some((false, false, _))) => {
+            // Subgrupo público: acceso permitido
+        }
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(SubgrupoResponse {
+                    success: false,
+                    message: "Subgrupo no encontrado en este nodo.".to_string(),
+                    subgrupo: None,
+                    subgrupos: None,
+                }),
+            );
+        }
+        Err(e) => {
+            eprintln!("Error al verificar subgrupo: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(SubgrupoResponse {
+                    success: false,
+                    message: "Error interno al verificar el subgrupo.".to_string(),
+                    subgrupo: None,
+                    subgrupos: None,
+                }),
+            );
+        }
+    }
+
+    // 3. Insertar en subgrupo_miembros
     let result = sqlx::query(
         "INSERT INTO subgrupo_miembros (subgrupo_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"
     )
@@ -412,7 +484,7 @@ pub async fn delete_subgrupo(
         "SELECT EXISTS(
             SELECT 1 FROM subgrupos s 
             LEFT JOIN nodo_miembros nm ON nm.nodo_id = s.nodo_id AND nm.user_id = $2
-            WHERE s.id = $1 AND (s.creado_por = $2 OR nm.rol IN ('ADMIN', 'OWNER'))
+            WHERE s.id = $1 AND (s.creado_por = $2 OR nm.rol IN ('ADMIN', 'OWNER')) AND s.is_archived = FALSE
         )"
     )
     .bind(subgrupo_id)
@@ -426,15 +498,16 @@ pub async fn delete_subgrupo(
             StatusCode::FORBIDDEN,
             Json(SubgrupoResponse {
                 success: false,
-                message: "No tienes permiso para eliminar este subgrupo.".to_string(),
+                message: "No tienes permiso para eliminar este subgrupo o ya fue archivado.".to_string(),
                 subgrupo: None,
                 subgrupos: None,
             }),
         );
     }
 
+    // 2. BUG-S2-06: Soft-delete (archivado lógico) en lugar de DELETE directo para auditoría histórica
     let result = sqlx::query(
-        "DELETE FROM subgrupos WHERE id = $1 AND nodo_id = $2"
+        "UPDATE subgrupos SET is_archived = TRUE WHERE id = $1 AND nodo_id = $2 AND is_archived = FALSE"
     )
     .bind(subgrupo_id)
     .bind(nodo_id)
@@ -448,7 +521,7 @@ pub async fn delete_subgrupo(
                     StatusCode::NOT_FOUND,
                     Json(SubgrupoResponse {
                         success: false,
-                        message: "Subgrupo no encontrado.".to_string(),
+                        message: "Subgrupo no encontrado o ya archivado.".to_string(),
                         subgrupo: None,
                         subgrupos: None,
                     }),
@@ -466,7 +539,7 @@ pub async fn delete_subgrupo(
             }
         }
         Err(e) => {
-            eprintln!("Error al eliminar subgrupo: {}", e);
+            eprintln!("Error al eliminar/archivar subgrupo: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(SubgrupoResponse {

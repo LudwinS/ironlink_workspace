@@ -790,21 +790,29 @@ class _NodoDetailsDialogState extends ConsumerState<NodoDetailsDialog> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     if (isOwnerOrAdmin) ...[
-                      Row(
-                        children: [
-                          _tabButton(0, 'Participantes (${_miembros?.length ?? widget.nodo.miembrosCount})'),
-                          const SizedBox(width: 8),
-                          _tabButton(1, 'Baneados (${_baneados?.length ?? 0})'),
-                        ],
+                      Flexible(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              _tabButton(0, 'Participantes (${_miembros?.length ?? widget.nodo.miembrosCount})'),
+                              const SizedBox(width: 8),
+                              _tabButton(1, 'Baneados (${_baneados?.length ?? 0})'),
+                            ],
+                          ),
+                        ),
                       ),
                     ] else ...[
-                      Text(
-                        'PARTICIPANTES (${_miembros?.length ?? widget.nodo.miembrosCount})',
-                        style: const TextStyle(
-                          color: _slate500,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 1.2,
+                      Flexible(
+                        child: Text(
+                          'PARTICIPANTES (${_miembros?.length ?? widget.nodo.miembrosCount})',
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: _slate500,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.2,
+                          ),
                         ),
                       ),
                     ],

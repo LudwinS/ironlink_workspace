@@ -82,8 +82,24 @@ class SubgruposNotifier extends StateNotifier<SubgruposState> {
     }
   }
 
-  Future<void> toggleJoin(Subgrupo subgrupo) async {
-    if (_nodoId == null) return;
+  Future<bool> toggleJoin(Subgrupo subgrupo) async {
+    if (_nodoId == null) return false;
+    
+    // 1. Actualización optimista inmediata en memoria
+    final newIsMember = !subgrupo.isMember;
+    final newCount = newIsMember
+        ? subgrupo.miembrosCount + 1
+        : (subgrupo.miembrosCount > 0 ? subgrupo.miembrosCount - 1 : 0);
+    final updatedSub = subgrupo.copyWith(
+      isMember: newIsMember,
+      miembrosCount: newCount,
+    );
+
+    state = state.copyWith(
+      subgrupos: state.subgrupos.map((s) => s.id == subgrupo.id ? updatedSub : s).toList(),
+      clearErrors: true,
+    );
+
     try {
       if (subgrupo.isMember) {
         await _repository.leaveSubgrupo(nodoId: _nodoId, subgrupoId: subgrupo.id);
@@ -91,8 +107,14 @@ class SubgruposNotifier extends StateNotifier<SubgruposState> {
         await _repository.joinSubgrupo(nodoId: _nodoId, subgrupoId: subgrupo.id);
       }
       await loadSubgrupos();
+      return true;
     } catch (e) {
-      state = state.copyWith(errorMessage: e.toString().replaceAll('Exception: ', ''));
+      // Revertir estado si el servidor rechaza la acción
+      await loadSubgrupos();
+      state = state.copyWith(
+        errorMessage: e.toString().replaceAll('Exception: ', ''),
+      );
+      return false;
     }
   }
 

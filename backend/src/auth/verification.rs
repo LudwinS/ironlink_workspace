@@ -654,7 +654,7 @@ pub async fn reset_password(
     let code = payload.code.trim().to_string();
 
     // 1. Validar política de contraseña
-    let field_errors = crate::auth::service::validate_password(&payload.new_password);
+    let field_errors = crate::auth::service::validate_password_field(&payload.new_password, "new_password");
     if !field_errors.is_empty() {
         return (
             StatusCode::BAD_REQUEST,

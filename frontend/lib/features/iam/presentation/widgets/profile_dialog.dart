@@ -38,6 +38,9 @@ class _ProfileDialogState extends ConsumerState<ProfileDialog> {
 
   // Password change controllers
   bool _showPasswordChange = false;
+  bool _obscureCurrentPass = true;
+  bool _obscureNewPass = true;
+  bool _obscureConfirmPass = true;
   final _currentPassCtrl = TextEditingController();
   final _newPassCtrl = TextEditingController();
   final _confirmPassCtrl = TextEditingController();
@@ -103,6 +106,17 @@ class _ProfileDialogState extends ConsumerState<ProfileDialog> {
     }
   }
 
+  void _showError(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: const Color(0xFFEF4444),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   Future<void> _saveProfile() async {
     if (!_formKey.currentState!.validate()) return;
     
@@ -126,19 +140,46 @@ class _ProfileDialogState extends ConsumerState<ProfileDialog> {
   }
 
   Future<void> _changePassword() async {
-    if (_newPassCtrl.text != _confirmPassCtrl.text) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Las contraseñas nuevas no coinciden.'),
-          backgroundColor: Color(0xFFEF4444),
-        ),
-      );
+    final current = _currentPassCtrl.text.trim();
+    final newPass = _newPassCtrl.text;
+    final confirm = _confirmPassCtrl.text;
+
+    if (current.isEmpty) {
+      _showError('Ingresa tu contraseña actual.');
+      return;
+    }
+    if (newPass.length < 8) {
+      _showError('La nueva contraseña debe tener al menos 8 caracteres.');
+      return;
+    }
+    if (!RegExp(r'[A-Z]').hasMatch(newPass)) {
+      _showError('La nueva contraseña debe contener al menos una letra mayúscula.');
+      return;
+    }
+    if (!RegExp(r'[a-z]').hasMatch(newPass)) {
+      _showError('La nueva contraseña debe contener al menos una letra minúscula.');
+      return;
+    }
+    if (!RegExp(r'[0-9]').hasMatch(newPass)) {
+      _showError('La nueva contraseña debe contener al menos un número.');
+      return;
+    }
+    if (!RegExp(r'''[!@#\$%^\&*()_+\-=\[\]{}|;:',.<>?/\\~`]''').hasMatch(newPass)) {
+      _showError('La nueva contraseña debe contener al menos un carácter especial (ej. !@#\$%^&*).');
+      return;
+    }
+    if (newPass == current) {
+      _showError('La nueva contraseña debe ser diferente a la contraseña actual.');
+      return;
+    }
+    if (newPass != confirm) {
+      _showError('Las contraseñas nuevas no coinciden.');
       return;
     }
 
     final success = await ref.read(profileProvider.notifier).changePassword(
-      currentPassword: _currentPassCtrl.text,
-      newPassword: _newPassCtrl.text,
+      currentPassword: current,
+      newPassword: newPass,
     );
 
     if (success && mounted) {
@@ -154,6 +195,9 @@ class _ProfileDialogState extends ConsumerState<ProfileDialog> {
         _newPassCtrl.clear();
         _confirmPassCtrl.clear();
       });
+    } else if (mounted) {
+      final err = ref.read(profileProvider).errorMessage ?? 'Error al cambiar la contraseña.';
+      _showError(err);
     }
   }
 
@@ -482,31 +526,70 @@ class _ProfileDialogState extends ConsumerState<ProfileDialog> {
                               const SizedBox(height: 10),
                               TextFormField(
                                 controller: _currentPassCtrl,
-                                obscureText: true,
+                                obscureText: _obscureCurrentPass,
                                 style: const TextStyle(color: _slate100, fontSize: 13),
                                 decoration: _inputDecoration(
                                   hint: 'Contraseña actual',
                                   prefixIcon: Icons.lock_outline_rounded,
+                                  suffixIcon: IconButton(
+                                    icon: Icon(
+                                      _obscureCurrentPass ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                                      color: _slate400,
+                                      size: 18,
+                                    ),
+                                    onPressed: () {
+                                      setState(() {
+                                        _obscureCurrentPass = !_obscureCurrentPass;
+                                      });
+                                    },
+                                    tooltip: _obscureCurrentPass ? 'Mostrar contraseña' : 'Ocultar contraseña',
+                                  ),
                                 ),
                               ),
                               const SizedBox(height: 10),
                               TextFormField(
                                 controller: _newPassCtrl,
-                                obscureText: true,
+                                obscureText: _obscureNewPass,
                                 style: const TextStyle(color: _slate100, fontSize: 13),
                                 decoration: _inputDecoration(
-                                  hint: 'Nueva contraseña (mín 8 chars)',
+                                  hint: 'Nueva contraseña (mín 8 chars, num, símb)',
                                   prefixIcon: Icons.lock_rounded,
+                                  suffixIcon: IconButton(
+                                    icon: Icon(
+                                      _obscureNewPass ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                                      color: _slate400,
+                                      size: 18,
+                                    ),
+                                    onPressed: () {
+                                      setState(() {
+                                        _obscureNewPass = !_obscureNewPass;
+                                      });
+                                    },
+                                    tooltip: _obscureNewPass ? 'Mostrar contraseña' : 'Ocultar contraseña',
+                                  ),
                                 ),
                               ),
                               const SizedBox(height: 10),
                               TextFormField(
                                 controller: _confirmPassCtrl,
-                                obscureText: true,
+                                obscureText: _obscureConfirmPass,
                                 style: const TextStyle(color: _slate100, fontSize: 13),
                                 decoration: _inputDecoration(
                                   hint: 'Confirmar nueva contraseña',
                                   prefixIcon: Icons.lock_rounded,
+                                  suffixIcon: IconButton(
+                                    icon: Icon(
+                                      _obscureConfirmPass ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                                      color: _slate400,
+                                      size: 18,
+                                    ),
+                                    onPressed: () {
+                                      setState(() {
+                                        _obscureConfirmPass = !_obscureConfirmPass;
+                                      });
+                                    },
+                                    tooltip: _obscureConfirmPass ? 'Mostrar contraseña' : 'Ocultar contraseña',
+                                  ),
                                 ),
                               ),
                               const SizedBox(height: 12),
@@ -563,11 +646,16 @@ class _ProfileDialogState extends ConsumerState<ProfileDialog> {
     );
   }
 
-  InputDecoration _inputDecoration({required String hint, required IconData prefixIcon}) {
+  InputDecoration _inputDecoration({
+    required String hint,
+    required IconData prefixIcon,
+    Widget? suffixIcon,
+  }) {
     return InputDecoration(
       hintText: hint,
       hintStyle: const TextStyle(color: _slate500, fontSize: 13),
       prefixIcon: Icon(prefixIcon, color: _slate400, size: 18),
+      suffixIcon: suffixIcon,
       filled: true,
       fillColor: _navy950,
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),

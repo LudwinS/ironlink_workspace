@@ -1351,7 +1351,7 @@ pub async fn send_mensaje(
     // 2. Si es para un subgrupo, validar que exista en este nodo y si es privado validar membresía
     if let Some(subgrupo_id) = payload.subgrupo_id {
         let sub_check = sqlx::query_as::<_, (bool,)>(
-            "SELECT es_privado FROM subgrupos WHERE id = $1 AND nodo_id = $2"
+            "SELECT es_privado FROM subgrupos WHERE id = $1 AND nodo_id = $2 AND is_archived = FALSE"
         )
         .bind(subgrupo_id)
         .bind(id)
@@ -1514,7 +1514,7 @@ pub async fn list_mensajes(
     // 2. Si es para un subgrupo, validar permisos y si es privado validar membresía
     if let Some(subgrupo_id) = query.subgrupo_id {
         let sub_check = sqlx::query_as::<_, (bool,)>(
-            "SELECT es_privado FROM subgrupos WHERE id = $1 AND nodo_id = $2"
+            "SELECT es_privado FROM subgrupos WHERE id = $1 AND nodo_id = $2 AND is_archived = FALSE"
         )
         .bind(subgrupo_id)
         .bind(id)

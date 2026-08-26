@@ -31,12 +31,20 @@ async fn main() {
     println!("Conectado a la base de datos con éxito.");
 
     // Ejecutar migraciones SQL
-    println!("Ejecutando migraciones SQL del Sprint 1...");
-    let migration_sql = std::fs::read_to_string("migrations/001_sprint1_complete.sql")
-        .expect("No se pudo leer el archivo de migración migrations/001_sprint1_complete.sql");
-    match sqlx::raw_sql(sqlx::AssertSqlSafe(migration_sql)).execute(&pool).await {
-        Ok(_) => println!("Migraciones ejecutadas/verificadas con éxito."),
-        Err(e) => println!("Advertencia/Error al ejecutar migraciones: {}", e),
+    println!("Ejecutando migraciones SQL del Sprint 1 y Sprint 2...");
+    let migration_files = [
+        "migrations/001_sprint1_complete.sql",
+        "migrations/002_sprint2_fixes.sql",
+    ];
+    for m_file in migration_files {
+        if let Ok(sql) = std::fs::read_to_string(m_file) {
+            match sqlx::raw_sql(sqlx::AssertSqlSafe(sql)).execute(&pool).await {
+                Ok(_) => println!("Migración '{}' ejecutada/verificada con éxito.", m_file),
+                Err(e) => println!("Advertencia/Error al ejecutar '{}': {}", m_file, e),
+            }
+        } else {
+            eprintln!("Advertencia: No se encontró el archivo de migración {}", m_file);
+        }
     }
 
     // Inicializar el mailer SMTP global
